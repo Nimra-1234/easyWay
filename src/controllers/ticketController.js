@@ -4,10 +4,18 @@ import { v4 as uuidv4 } from 'uuid'; // To generate unique ticket IDs
 // Define ticket expiry time in seconds (70 minutes = 4200 seconds)
 const TICKET_EXPIRY_TIME = 4200;
 
+// Regular expression to validate taxCode
+const taxCodeRegex = /^[a-zA-Z0-9]{14}$/;
+
 export const createTicket = async (req, res) => {
     const { name, taxCode, routeId, tripId, contact } = req.body;
 
     try {
+        // Validate taxCode format
+        if (!taxCodeRegex.test(taxCode)) {
+            return res.status(400).json({ error: 'Invalid tax code format. Must be exactly 14 characters (letters and numbers only).' });
+        }
+
         // Check if the user exists
         let user = await redisClient.hGet(`user:${taxCode}`, 'data');
 
@@ -61,7 +69,6 @@ export const createTicket = async (req, res) => {
         res.status(500).json({ error: 'Internal server error' });
     }
 };
-
 
 export const getTicket = async (req, res) => {
     const { ticketId } = req.params;

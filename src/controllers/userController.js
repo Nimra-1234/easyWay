@@ -1,11 +1,67 @@
-import bcrypt from 'bcryptjs';
-import redisClient from '../config/redisClient.js';  // Redis client import
+import redisClient from '../config/redisClient.js'; // Redis client import
 
-// Example of user login (without authentication token part)
-export const loginUser = async (req, res) => {
-  const { taxCode, password } = req.body;
+// Regular expressions for validation
+const taxCodeRegex = /^[a-zA-Z0-9]{14}$/;
+const emailRegex = /^\S+@\S+\.\S+$/;
+
+export const createUser = async (req, res) => {
+  const { name, taxCode, contact } = req.body;
+
+  console.log('Received data:', req.body); // Log incoming data
 
   try {
+    // Validate required fields
+    if (!name || !taxCode || !contact) {
+      return res.status(400).json({ error: 'Missing required fields' });
+    }
+
+    // Validate taxCode format
+    if (!taxCodeRegex.test(taxCode)) {
+      return res.status(400).json({ error: 'Invalid tax code format. Must be exactly 14 characters (letters and numbers only).' });
+    }
+
+    // Validate contact as an email
+    if (!emailRegex.test(contact)) {
+      return res.status(400).json({ error: 'Invalid contact format. Must be a valid email address.' });
+    }
+
+    // Check if the user already exists in Redis
+    const existingUser = await redisClient.hGetAll(`user:${taxCode}`);
+    if (Object.keys(existingUser).length !== 0) {
+      return res.status(400).json({ error: 'User with this tax code already exists.' });
+    }
+
+    // Create an object with all the user data
+    const userData = {
+      name,
+      taxCode,
+      contact,
+      createdAt: new Date().toISOString(),
+    };
+
+    console.log('User data to be stored:', userData); // Log user data
+
+    // Store user data in Redis using hSet with the object
+    await redisClient.hSet(`user:${taxCode}`, userData);
+
+    res.status(201).json({ message: 'User created successfully' });
+  } catch (error) {
+    console.error('Error creating user:', error); // Log the error
+    res.status(500).json({ error: `Internal server error: ${error.message}` });
+  }
+};
+
+
+// Example of user login
+export const loginUser = async (req, res) => {
+  const { taxCode } = req.body;
+
+  try {
+    // Validate taxCode format
+    if (!taxCodeRegex.test(taxCode)) {
+      return res.status(400).json({ error: 'Invalid tax code format. Must be exactly 14 characters (letters and numbers only).' });
+    }
+
     // Fetch the user data from Redis using taxCode
     const user = await redisClient.hGetAll(`user:${taxCode}`);
 
@@ -13,56 +69,16 @@ export const loginUser = async (req, res) => {
       return res.status(404).json({ error: 'User not found' });
     }
 
-    // Compare the provided password with the stored hashed password
-    const isPasswordValid = await bcrypt.compare(password, user.password);
-
-    if (!isPasswordValid) {
-      return res.status(400).json({ error: 'Invalid password' });
-    }
-
-    // Since JWT token generation is removed, just respond with a success message
+    // If no password is required, just validate the taxCode exists
     res.status(200).json({
       message: 'Login successful',
     });
   } catch (error) {
     console.error('Error logging in user:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    res.status(500).json({ error: `Internal server error: ${error.message}` });
   }
 };
 
-// Create a new user (without generating a token)
-// createUser function
-export const createUser = async (req, res) => {
-  const { name, taxCode, contact, password } = req.body;
-
-  console.log("Received data:", req.body);  // Log incoming data
-
-  try {
-    // Check if the user already exists in Redis
-    const existingUser = await redisClient.hGetAll(`user:${taxCode}`);
-    if (Object.keys(existingUser).length !== 0) {
-      return res.status(400).json({ error: 'User with this taxCode already exists.' });
-    }
-
-    // Create an object with all the user data
-    const userData = {
-      name,
-      taxCode,
-      contact: JSON.stringify(contact), // Stringify contact object if it's complex
-      createdAt: new Date().toISOString(),
-    };
-
-    console.log("User data to be stored:", userData);  // Log user data
-
-    // Store user data in Redis using hSet with the object
-    await redisClient.hSet(`user:${taxCode}`, userData);
-
-    res.status(201).json({ message: 'User created successfully' });
-  } catch (error) {
-    console.error('Error creating user:', error);  // Log the error
-    res.status(500).json({ error: 'Internal server error' });
-  }
-};
 
 
 // Get user details by taxCode
