@@ -1,4 +1,5 @@
 import express, { json } from 'express';
+import { connectMongoDB} from './src/config/mongoDb.js';
 import cors from 'cors';
 import userRoutes from './src/routes/userRoutes.js';
 import routeRoutes from './src/routes/routeRoutes.js';  // Import route routes
@@ -8,6 +9,7 @@ import ticketRoutes from './src/routes/ticketRoutes.js';
 import vehicleRoutes from './src/routes/vehicleRoutes.js';
 import alertRoutes from './src/routes/alertRoutes.js';
 import tripUpdateRoutes from './src/routes/tripUpdateRoutes.js';
+import gtfsRoutes from './src/routes/gtfsRoutes.js';
 import swaggerUi from 'swagger-ui-express';
 import swaggerJSDoc from 'swagger-jsdoc';
 
@@ -18,10 +20,15 @@ app.use(cors());
 
 // Middleware to parse incoming JSON requests
 app.use(json());
+connectMongoDB();
 
 // Register user and booking routes
 app.use('/api/users', userRoutes);
 app.use('/api/tickets', ticketRoutes);
+
+// In your main app.js or index.js
+
+app.use('/api/gtfs', gtfsRoutes);
 
 // Register GTFS routes
 app.use('/api/routes', routeRoutes);  // Register route routes under /api/routes
