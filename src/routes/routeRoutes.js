@@ -9,6 +9,8 @@ const router = express.Router();
  *   get:
  *     summary: Get all routes
  *     description: Retrieve all routes available in the system.
+ *     tags:
+ *       - Checking Routes
  *     responses:
  *       200:
  *         description: Successfully retrieved all routes
@@ -45,6 +47,8 @@ router.get('/', getAllRoutes);
  *   get:
  *     summary: Get route by ID
  *     description: Retrieve details of a specific route by its ID.
+ *     tags:
+ *       - Checking Routes
  *     parameters:
  *       - name: id
  *         in: path

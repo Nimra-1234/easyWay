@@ -1,52 +1,53 @@
-// import client from '../config/redisClient.js';
+import mongoose from 'mongoose';
+import Stop from '../models/stopModel.js'; //Assuming a Stop Model is defined in this path
 
-// export const getAllStops = async (req, res) => {
-//   const keys = await client.keys('stop:*');
-//   const routes = await Promise.all(keys.map(key => client.hGetAll(key)));
-//   res.json(routes);
-// };
-
-// export const getStopById = async (req, res) => {
-//   const route = await client.hGetAll(`stop:${req.params.id}`);
-//   res.json(route);
-// };
-
-// stopController.js
-import client from '../config/redisClient.js';
-
-// Get all stops
 export const getAllStops = async (req, res) => {
   try {
-    const keys = await client.keys('stop:*');
-    const stops = await Promise.all(keys.map(key => client.hGetAll(key)));
-    
-    // Filter out empty objects and sort by stop_sequence if available
-    const validStops = stops
-      .filter(stop => Object.keys(stop).length > 0)
-      .sort((a, b) => (a.stop_sequence || 0) - (b.stop_sequence || 0));
-
-    res.json(validStops);
+    const stops = await Stop.find().limit(1000); // Fetch all stops from the MongoDB collection
+    res.json({
+      success: true,
+      data: stops
+    });
   } catch (error) {
-    console.error('Error fetching stops:', error);
-    res.status(500).json({ error: 'Internal Server Error' });
+    console.error("Error fetching all stops:", error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
   }
 };
 
-// Get stop by ID
 export const getStopById = async (req, res) => {
   try {
-    const stop = await client.hGetAll(`stop:${req.params.id}`);
-    
-    if (Object.keys(stop).length === 0) {
-      return res.status(404).json({ error: 'Stop not found' });
+    const stopId = req.params.id;
+    const stop = await Stop.findOne({ stop_id: stopId }); // Assuming route_id is the field name
+
+    if (!stop) {
+      return res.status(404).json({
+        success: false,
+        message: "Stop not found"
+      });
     }
-    
-    res.json(stop);
+
+    res.json({
+      success: true,
+      data: stop
+    });
   } catch (error) {
-    console.error('Error fetching stop:', error);
-    res.status(500).json({ error: 'Internal Server Error' });
+    console.error("Error fetching stop by ID:", error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
   }
 };
+
+
+
+
+
+
+
 
 // Get stop times for a specific trip
 // export const getStopTimesByTripId = async (req, res) => {

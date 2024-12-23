@@ -10,7 +10,7 @@ const router = express.Router();
  *     summary: Get trip update by tripId
  *     description: Retrieve the details of a trip update by its tripId.
  *     tags:
- *       - Trip Updates
+ *       - Trip Updates - RealTime
  *     parameters:
  *       - name: tripId
  *         in: path

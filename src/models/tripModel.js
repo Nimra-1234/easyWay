@@ -9,7 +9,9 @@ const tripSchema = new mongoose.Schema({
   trip_short_name: String,
   direction_id: Number,
   block_id: String,
-  shape_id: String
+  shape_id: String,
+  wheelchair_accessible: String,
+  exceptional: String
 }, { strict: false });
 
 export default mongoose.model('Trip', tripSchema);

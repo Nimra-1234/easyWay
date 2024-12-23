@@ -1,102 +1,188 @@
-import redisClient from '../config/redisClient.js'; // Redis client import
+// import redisClient from '../config/redisClient.js';  // Redis client import
+// import { v4 as uuidv4 } from 'uuid'; // To generate unique ticket IDs
+
+// // Create a new ticket
+// export const createTicket = async (req, res) => {
+//     const { name, taxCode, routeId, tripId } = req.body;
+  
+//     try {
+//         console.log('Received data:', req.body);  // Log the incoming data for debugging
+
+//         // Check if the user exists in Redis
+//         let user = await redisClient.hGetAll(`user:${taxCode}`);
+//         console.log(`User found in Redis:`, user);  // Log user data for debugging
+
+//         if (Object.keys(user).length === 0) {
+//             // If the user does not exist, create the user
+//             user = {
+//                 name,
+//                 taxCode,
+//                 createdAt: new Date().toISOString(),
+//             };
+            
+//             // Store the user in Redis
+//             await redisClient.hSet(`user:${taxCode}`, user);
+//             console.log(`New user created with taxCode: ${taxCode}`);
+//         }
+
+//         // Generate a unique ticket ID
+//         const ticketId = uuidv4();
+//         console.log(`Generated ticket ID: ${ticketId}`);  // Log ticket ID for debugging
+        
+//         // Create the ticket object
+//         const ticket = {
+//             ticketId,
+//             userId: taxCode,  // The user's taxCode is the user ID
+//             routeId,
+//             tripId,
+//             status: 'active',  // Default status when ticket is created
+//             createdAt: new Date().toISOString(),
+//         };
+
+//         console.log('Ticket data to be stored:', ticket);  // Log ticket data before storing
+        
+//         // Store the ticket in Redis
+//         await redisClient.hSet(`ticket:${ticketId}`, ticket);
+//         console.log('Ticket stored successfully in Redis');  // Log success message
+
+//         // Respond with success message and ticket details
+//         res.status(201).json({
+//             message: 'Ticket created successfully',
+//             ticket: {
+//                 ticketId,
+//                 userId: taxCode,
+//                 routeId,
+//                 tripId,
+//                 status: 'active',
+//             },
+//         });
+//     } catch (error) {
+//         console.error('Error creating ticket:', error);  // Log the error for debugging
+//         res.status(500).json({ error: `Internal server error: ${error.message}` });
+//     }
+// };
+
+// // Get ticket details by ticket ID
+// export const getTicket = async (req, res) => {
+//     const { ticketId } = req.params;
+
+//     try {
+//         console.log(`Fetching ticket data for ticketId: ${ticketId}`);  // Log the ticket ID being fetched
+        
+//         // Fetch ticket details from Redis
+//         const ticket = await redisClient.hGetAll(`ticket:${ticketId}`);
+//         console.log('Ticket data retrieved from Redis:', ticket);  // Log ticket data for debugging
+        
+//         if (Object.keys(ticket).length === 0) {
+//             return res.status(404).json({ error: 'Ticket not found' });
+//         }
+
+//         res.status(200).json(ticket);
+//     } catch (error) {
+//         console.error('Error retrieving ticket:', error);
+//         res.status(500).json({ error: `Internal server error: ${error.message}` });
+//     }
+// };
+
+import redisClient from '../config/redisClient.js';  // Redis client import
 import { v4 as uuidv4 } from 'uuid'; // To generate unique ticket IDs
 
-// Define ticket expiry time in seconds (70 minutes = 4200 seconds)
-const TICKET_EXPIRY_TIME = 4200;
-
-// Regular expression to validate taxCode
-const taxCodeRegex = /^[a-zA-Z0-9]{14}$/;
-
+// Create a new ticket
 export const createTicket = async (req, res) => {
-    const { name, taxCode, routeId, tripId, contact } = req.body;
-
+    const { name, taxCode, routeId, tripId } = req.body;
+  
     try {
-        // Validate taxCode format
+        console.log('Received data:', req.body);  // Log the incoming data for debugging
+
+        // Validate taxCode format (must be 14 digits alphanumeric)
+        const taxCodeRegex = /^[a-zA-Z0-9]{14}$/;
         if (!taxCodeRegex.test(taxCode)) {
-            return res.status(400).json({ error: 'Invalid tax code format. Must be exactly 14 characters (letters and numbers only).' });
+            return res.status(400).json({ error: 'Invalid tax code format. It must be exactly 14 characters (letters and numbers only).' });
         }
 
-        // Check if the user exists
-        let user = await redisClient.hGet(`user:${taxCode}`, 'data');
+        // Check if the user exists in Redis using taxCode
+        let user = await redisClient.hGetAll(`user:${taxCode}`);
+        console.log(`User found in Redis:`, user);  // Log user data for debugging
 
-        if (!user) {
+        if (Object.keys(user).length === 0) {
             // If the user does not exist, create the user
             user = {
                 name,
                 taxCode,
-                contact, // Assuming contact is a string or serializable
                 createdAt: new Date().toISOString(),
             };
-
-            // Store the user in Redis as a JSON string
-            await redisClient.hSet(`user:${taxCode}`, 'data', JSON.stringify(user));
+            
+            // Store the user in Redis
+            await redisClient.hSet(`user:${taxCode}`, user);
             console.log(`New user created with taxCode: ${taxCode}`);
-        } else {
-            // Parse user if it exists
-            user = JSON.parse(user);
         }
 
-        // Generate a unique ticket ID
+        // Generate a unique ticket ID using UUID
         const ticketId = uuidv4();
-
-        // Calculate expiry time
-        const expiryTime = new Date(Date.now() + TICKET_EXPIRY_TIME * 1000).toISOString();
-
+        console.log(`Generated ticket ID: ${ticketId}`);  // Log ticket ID for debugging
+        
+        // Calculate expiration time (70 minutes from now)
+        const expirationTime = new Date(Date.now() + 70 * 60 * 1000);  // 70 minutes in the future
+        const expirationTimeFormatted = expirationTime.toISOString();  // Format as ISO string
+        
         // Create the ticket object
         const ticket = {
             ticketId,
-            userId: taxCode, // The user's taxCode is the user ID
+            userId: taxCode,  // The user's taxCode is the user ID
             routeId,
             tripId,
-            status: 'active', // Default status when ticket is created
-            createdAt: new Date().toISOString(),
-            expiryTime, // Store the exact expiry time
+            status: 'active',  // Default status when ticket is created
+            expired_at: expirationTimeFormatted,  // Expiration time
+            createdOn: new Date().toISOString(),  // Store created time as 'createdOn'
         };
 
-        // Store the ticket in Redis as a JSON string
-        await redisClient.hSet(`ticket:${ticketId}`, 'data', JSON.stringify(ticket));
+        console.log('Ticket data to be stored:', ticket);  // Log ticket data before storing
+        
+        // Store the ticket in Redis
+        await redisClient.hSet(`ticket:${ticketId}`, ticket);
+        console.log('Ticket stored successfully in Redis');  // Log success message
 
-        // Set the expiry time for the ticket (70 minutes)
-        await redisClient.expire(`ticket:${ticketId}`, TICKET_EXPIRY_TIME);
+        // Set the expiration time of 70 minutes (in seconds) for the ticket
+        await redisClient.expire(`ticket:${ticketId}`, 70 * 60);
+        console.log('Expiration time set to 70 minutes for ticket:', ticketId);
 
         // Respond with success message and ticket details
         res.status(201).json({
             message: 'Ticket created successfully',
-            ticket,
+            ticket: {
+                ticketId,
+                userId: taxCode,
+                routeId,
+                tripId,
+                status: 'active',
+                createdOn: ticket.createdOn,
+                expired_at: ticket.expired_at,  // Return expiration time
+            },
         });
     } catch (error) {
-        console.error('Error creating ticket:', error);
-        res.status(500).json({ error: 'Internal server error' });
+        console.error('Error creating ticket:', error);  // Log the error for debugging
+        res.status(500).json({ error: `Internal server error: ${error.message}` });
     }
 };
 
+// Get ticket details by ticket ID
 export const getTicket = async (req, res) => {
     const { ticketId } = req.params;
 
     try {
+        console.log(`Fetching ticket data for ticketId: ${ticketId}`);  // Log the ticket ID being fetched
+        
         // Fetch ticket details from Redis
-        const ticketData = await redisClient.hGet(`ticket:${ticketId}`, 'data');
-
-        if (!ticketData) {
-            return res.status(404).json({ error: 'Ticket not found or expired' });
+        const ticket = await redisClient.hGetAll(`ticket:${ticketId}`);
+        console.log('Ticket data retrieved from Redis:', ticket);  // Log ticket data for debugging
+        
+        if (Object.keys(ticket).length === 0) {
+            return res.status(404).json({ error: 'Ticket not found' });
         }
 
-        // Parse the ticket data
-        const ticket = JSON.parse(ticketData);
-
-        // Get the remaining time-to-live (TTL) in seconds
-        const ttl = await redisClient.ttl(`ticket:${ticketId}`);
-
-        // If TTL is greater than 0, calculate the time left in minutes and seconds
-        const timeLeft = ttl > 0 ? `${Math.floor(ttl / 60)}m ${ttl % 60}s` : 'Expired';
-
-        // Add timeLeft to the ticket details
-        res.status(200).json({
-            ...ticket,
-            timeLeft,
-        });
+        res.status(200).json(ticket);
     } catch (error) {
         console.error('Error retrieving ticket:', error);
-        res.status(500).json({ error: 'Internal server error' });
+        res.status(500).json({ error: `Internal server error: ${error.message}` });
     }
 };

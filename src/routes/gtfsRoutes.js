@@ -1,5 +1,5 @@
 import express from 'express';
-import { getRouteAnalytics, getBusyStops, getRoutesByTripCount,getStopsMostUsedByTrips,calculateAverageTripDuration} from '../controllers/gtfsController.js';
+import { getRouteAnalytics, getBusyStops, getRoutesByTripCount,calculateAverageTripDuration,getStopTimesByTrip} from '../controllers/gtfsController.js';
 
 const router = express.Router();
 
@@ -56,7 +56,7 @@ router.get('/routes/analytics', getRouteAnalytics);
  * /api/gtfs/stops/busy:
  *   get:
  *     tags:
- *       - Stops
+ *       - Busy Stops
  *     summary: Retrieve information on busy stops.
  *     description: Returns details of the busiest stops based on the number of visits.
  *     parameters:
@@ -146,43 +146,6 @@ router.get('/stops/busy', getBusyStops);
  *         description: Server error
  */
 router.get('/routes/tripcount', getRoutesByTripCount);
-/**
- * @openapi
- * /api/gtfs/stops/most-used:
- *   get:
- *     summary: Find stops used by the most trips
- *     tags: [Most used Stops]
- *     description: Retrieves the top stops based on the number of trips that stop there.
- *     responses:
- *       200:
- *         description: A list of stops most frequently used by trips.
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                   example: true
- *                 data:
- *                   type: array
- *                   items:
- *                     type: object
- *                     properties:
- *                       stopId:
- *                         type: string
- *                         example: "12345"
- *                       stopName:
- *                         type: string
- *                         example: "Downtown Station"
- *                       tripCount:
- *                         type: integer
- *                         example: 320
- *       500:
- *         description: Server error
- */
-
-router.get('/stops/most-used', getStopsMostUsedByTrips);
 
 /**
  * @swagger
@@ -230,5 +193,44 @@ router.get('/stops/most-used', getStopsMostUsedByTrips);
 
 
 router.get('/routes/:routeId/average-duration', calculateAverageTripDuration);
+
+/**
+ * @openapi
+ * /api/gtfs/trips/{tripId}/stop-times:
+ *   get:
+ *     tags:
+ *       - Stop Times by trip
+ *     summary: Retrieve stop times for a specific trip.
+ *     description: Returns a list of stop times ordered by stop sequence for a given trip ID.
+ *     parameters:
+ *       - in: path
+ *         name: tripId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: The ID of the trip to retrieve stop times for.
+ *     responses:
+ *       200:
+ *         description: Successfully retrieved stop times.
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     $ref: '#/components/schemas/StopTime'
+ *       404:
+ *         description: Trip not found
+ *       500:
+ *         description: Server error
+ */
+
+
+router.get('/trips/:tripId/stop-times', getStopTimesByTrip);
 
 export default router;

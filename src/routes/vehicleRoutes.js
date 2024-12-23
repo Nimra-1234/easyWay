@@ -9,6 +9,8 @@ const router = express.Router();
  *   get:
  *     summary: Get real-time vehicle position
  *     description: Retrieve the real-time position of a specific vehicle by its vehicleId.
+ *     tags:
+ *       - Track Vehicles
  *     parameters:
  *       - name: vehicleId
  *         in: path

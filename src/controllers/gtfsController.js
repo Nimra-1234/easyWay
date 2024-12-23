@@ -173,54 +173,6 @@ export const getRoutesByTripCount = async (req, res) => {
     }
 };
 
-export const getStopsMostUsedByTrips = async (req, res) => {
-    try {
-        const mostUsedStops = await StopTime.aggregate([
-            {
-                $group: {
-                    _id: "$stop_id",  // Group by stop_id
-                    tripCount: { $sum: 1 }  // Count the number of times each stop_id appears
-                }
-            },
-            {
-                $lookup: {
-                    from: "stops", // Assuming 'stops' is the name of your collection for stop details
-                    localField: "_id",
-                    foreignField: "stop_id",
-                    as: "stopDetails"
-                }
-            },
-            {
-                $unwind: "$stopDetails"  // Flatten the array of stop details
-            },
-            {
-                $sort: { tripCount: -1 }  // Sort the results by tripCount in descending order
-            },
-            {
-                $project: {  // Define what to return
-                    _id: 0,
-                    stopId: "$_id",
-                    stopName: "$stopDetails.stop_name",
-                    tripCount: 1
-                }
-            },
-            {
-                $limit: 10  // Limit to top 10 most used stops
-            }
-        ]);
-
-        res.json({
-            success: true,
-            data: mostUsedStops
-        });
-    } catch (error) {
-        console.error("Error fetching most used stops:", error);
-        res.status(500).json({
-            success: false,
-            error: error.message
-        });
-    }
-};
 
 export const calculateAverageTripDuration = async (req, res) => {
     const { routeId } = req.params;
@@ -281,6 +233,24 @@ export const calculateAverageTripDuration = async (req, res) => {
         });
     } catch (error) {
         console.error("Error calculating average trip duration:", error);
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+};
+
+
+export const getStopTimesByTrip = async (req, res) => {
+    const { tripId } = req.params; // Extract tripId from the request parameters
+
+    try {
+        const stopTimes = await StopTime.find({ trip_id: tripId }).sort({ stop_sequence: 1 });
+        res.json({
+            success: true,
+            data: stopTimes
+        });
+    } catch (error) {
         res.status(500).json({
             success: false,
             error: error.message

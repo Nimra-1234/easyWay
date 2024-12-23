@@ -23,6 +23,9 @@ const userSchema = new mongoose.Schema({
   },
 });
 
+// Add a compound index to ensure uniqueness of `contact` for each `taxCode`
+userSchema.index({ taxCode: 1, contact: 1 }, { unique: true, partialFilterExpression: { contact: { $exists: true } } });
+
 const User = mongoose.model('User', userSchema);
 
 export default User;
