@@ -1,5 +1,5 @@
 import express from 'express';
-import { getRouteAnalytics, getBusyStops, getRoutesByTripCount,calculateAverageTripDuration,getStopTimesByTrip} from '../controllers/gtfsController.js';
+import { getRouteAnalytics, getBusyStops, getRoutesByTripCount,calculateAverageTripDuration,getStopTimesByTrip, getRoutesActiveOnDays} from '../controllers/gtfsController.js';
 
 const router = express.Router();
 
@@ -56,7 +56,7 @@ router.get('/routes/analytics', getRouteAnalytics);
  * /api/gtfs/stops/busy:
  *   get:
  *     tags:
- *       - Busy Stops
+ *       - Details of Busy Stops
  *     summary: Retrieve information on busy stops.
  *     description: Returns details of the busiest stops based on the number of visits.
  *     parameters:
@@ -101,7 +101,7 @@ router.get('/stops/busy', getBusyStops);
  * /api/gtfs/routes/tripcount:
  *   get:
  *     tags:
- *       - Routes
+ *       - RoutesCount
  *     summary: Retrieve routes with a specific number of trips.
  *     description: Returns a list of routes that have exactly the specified number of trips.
  *     parameters:
@@ -232,5 +232,58 @@ router.get('/routes/:routeId/average-duration', calculateAverageTripDuration);
 
 
 router.get('/trips/:tripId/stop-times', getStopTimesByTrip);
+
+/**
+ * @openapi
+ * /api/gtfs/routes/active:
+ *   get:
+ *     tags:
+ *       - Active Routes On Days
+ *     summary: Retrieve active routes on a specific date.
+ *     description: Returns a list of routes that are active on the provided date. The date should be in YYYYMMDD format.
+ *     parameters:
+ *       - in: query
+ *         name: date
+ *         schema:
+ *           type: string
+ *           format: date
+ *           example: '20241223'
+ *         required: true
+ *         description: The date to check for active routes, formatted as YYYYMMDD.
+ *     responses:
+ *       200:
+ *         description: Successfully retrieved list of active routes.
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       route_id:
+ *                         type: string
+ *                         example: "102"
+ *                       route_short_name:
+ *                         type: string
+ *                         example: "10"
+ *                       route_long_name:
+ *                         type: string
+ *                         example: "Airport - Downtown"
+ *                       is_active:
+ *                         type: boolean
+ *                         example: true
+ *       400:
+ *         description: Bad request, possible incorrect date format.
+ *       500:
+ *         description: Server error
+ */
+router.get('/routes/active', getRoutesActiveOnDays);
+
 
 export default router;

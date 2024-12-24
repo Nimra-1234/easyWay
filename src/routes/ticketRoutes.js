@@ -1,5 +1,5 @@
 import express from 'express';
-import { createTicket, getTicket } from '../controllers/ticketController.js';
+import { createTicket, getTicket, getExpiredTickets } from '../controllers/ticketController.js';
 
 const router = express.Router();
 
@@ -114,5 +114,52 @@ router.post('/create', createTicket);
  *         description: Internal Server Error
  */
 router.get('/:ticketId', getTicket);  // Uncomment authenticate middleware if needed
+/**
+ * @swagger
+ * /api/tickets/expired:
+ *   get:
+ *     summary: Get all expired tickets
+ *     description: Fetch all tickets that have expired.
+ *     tags:
+ *       - Tickets
+ *     responses:
+ *       200:
+ *         description: Successfully retrieved the expired tickets.
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: array
+ *               items:
+ *                 type: object
+ *                 properties:
+ *                   ticketId:
+ *                     type: string
+ *                     description: The unique ID for the ticket.
+ *                   userId:
+ *                     type: string
+ *                     description: The taxCode of the user.
+ *                   routeId:
+ *                     type: string
+ *                     description: The route ID for the trip.
+ *                   tripId:
+ *                     type: string
+ *                     description: The trip ID associated with the ticket.
+ *                   status:
+ *                     type: string
+ *                     description: The current status of the ticket (active, expired).
+ *                   expired_at:
+ *                     type: string
+ *                     format: date-time
+ *                     description: The timestamp of when the ticket expired.
+ *                   createdOn:
+ *                     type: string
+ *                     format: date-time
+ *                     description: The timestamp when the ticket was created.
+ *       404:
+ *         description: No expired tickets found.
+ *       500:
+ *         description: Internal Server Error.
+ */
 
+router.get('/expired', getExpiredTickets);
 export default router;

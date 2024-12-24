@@ -68,6 +68,7 @@ import Route from '../models/routeModel.js';
 import Stop from '../models/stopModel.js';
 import Trip from '../models/tripModel.js';
 import StopTime from '../models/stopTimeModel.js';
+import Calendar from '../models/calendarModel.js';
 
 // Configuration
 const config = {
@@ -89,7 +90,8 @@ const verifyCollections = async () => {
         { model: Route, expectedName: 'routes' },
         { model: Stop, expectedName: 'stops' },
         { model: Trip, expectedName: 'trips' },
-        { model: StopTime, expectedName: 'stoptimes' }
+        { model: StopTime, expectedName: 'stoptimes' },
+        { model: Calendar, expectedName: 'calendars'}
     ];
 
     for (const { model, expectedName } of models) {
@@ -194,14 +196,16 @@ const importGTFSData = async () => {
             Route.deleteMany({}),
             Stop.deleteMany({}),
             Trip.deleteMany({}),
-            StopTime.deleteMany({})
+            StopTime.deleteMany({}),
+            Calendar.deleteMany({}),
         ]);
 
         const imports = [
             { model: Route, name: 'routes' },
             { model: Stop, name: 'stops' },
             { model: Trip, name: 'trips' },
-            { model: StopTime, name: 'stop_times' }
+            { model: StopTime, name: 'stop_times' },
+            { model: Calendar, name: 'calendar_dates'}
         ];
 
         for (const importItem of imports) {

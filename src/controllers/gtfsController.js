@@ -3,6 +3,7 @@ import Route from '../models/routeModel.js';
 import Trip from '../models/tripModel.js';
 import Stop from '../models/stopModel.js';
 import StopTime from '../models/stopTimeModel.js';
+import Calendar from '../models/calendarModel.js';
 
 export const getRouteAnalytics = async (req, res) => {
     try {
@@ -242,18 +243,134 @@ export const calculateAverageTripDuration = async (req, res) => {
 
 
 export const getStopTimesByTrip = async (req, res) => {
-    const { tripId } = req.params; // Extract tripId from the request parameters
-
+    const { tripId } = req.params;
     try {
-        const stopTimes = await StopTime.find({ trip_id: tripId }).sort({ stop_sequence: 1 });
-        res.json({
-            success: true,
-            data: stopTimes
-        });
+        const stopTimes = await StopTime.aggregate([
+            { $match: { trip_id: tripId } },
+            {
+                $lookup: {
+                    from: "stops",
+                    localField: "stop_id",
+                    foreignField: "stop_id",
+                    as: "stopDetails"
+                }
+            },
+            { $unwind: "$stopDetails" },
+            {
+                $project: {
+                    arrival_time: 1,
+                    departure_time: 1,
+                    stop_sequence: 1,
+                    stop_name: "$stopDetails.stop_name",
+                    stop_lat: "$stopDetails.stop_lat",
+                    stop_lon: "$stopDetails.stop_lon"
+                }
+            },
+            { $sort: { stop_sequence: 1 } }
+        ]);
+        res.json({ success: true, data: stopTimes });
     } catch (error) {
-        res.status(500).json({
-            success: false,
-            error: error.message
-        });
+        res.status(500).json({ success: false, error: error.message });
     }
+};
+
+export const getRoutesActiveOnDays = async (req, res) => {
+  try {
+      const { date } = req.query; // Expect date in YYYYMMDD format
+      if (!date || !/^\d{8}$/.test(date)) {
+          throw new Error('Invalid date format. Please use YYYYMMDD format');
+      }
+
+      const pipeline = [
+          // Start with routes
+          {
+              $lookup: {
+                  from: "trips",
+                  localField: "route_id",
+                  foreignField: "route_id",
+                  as: "route_trips"
+              }
+          },
+          // Unwind the trips
+          {
+              $unwind: "$route_trips"
+          },
+          // Lookup calendar_dates for exceptions
+          {
+              $lookup: {
+                  from: "calendar_dates",
+                  let: { serviceId: "$route_trips.service_id" },
+                  pipeline: [
+                      {
+                          $match: {
+                              $expr: {
+                                  $and: [
+                                      { $eq: ["$service_id", "$$serviceId"] },
+                                      { $eq: ["$date", date] }
+                                  ]
+                              }
+                          }
+                      }
+                  ],
+                  as: "exceptions"
+              }
+          },
+          // Filter based on exceptions
+          {
+              $match: {
+                  $or: [
+                      // Include services that are added on this date
+                      {
+                          "exceptions": {
+                              $elemMatch: {
+                                  exception_type: 1
+                              }
+                          }
+                      },
+                      // Include regular services that aren't removed on this date
+                      {
+                          $and: [
+                              { "exceptions": { $not: { $elemMatch: { exception_type: 2 } } } },
+                              // Add any additional regular service day conditions here if needed
+                          ]
+                      }
+                  ]
+              }
+          },
+          // Group by route to remove duplicates
+          {
+              $group: {
+                  _id: "$route_id",
+                  route_short_name: { $first: "$route_short_name" },
+                  route_long_name: { $first: "$route_long_name" },
+                  route_type: { $first: "$route_type" },
+                  service_ids: { $addToSet: "$route_trips.service_id" }
+              }
+          },
+          // Final projection
+          {
+              $project: {
+                  _id: 0,
+                  route_id: "$_id",
+                  route_short_name: 1,
+                  route_long_name: 1,
+                  route_type: 1,
+                  service_ids: 1
+              }
+          }
+      ];
+
+      const db = req.app.locals.db;
+      const routes = await db.collection('routes').aggregate(pipeline).toArray();
+      
+      res.json({
+          status: 'success',
+          data: routes
+      });
+  } catch (error) {
+      res.status(500).json({
+          status: 'error',
+          message: error.message
+      });
+  }
 };

@@ -43,151 +43,104 @@ export const getStopById = async (req, res) => {
 };
 
 
+export const updateStopName = async (req, res) => {
+  const { stop_id, new_name } = req.body;
 
+  if (!stop_id || !new_name) {
+    console.log("Update attempt with incomplete data", req.body);
+    return res.status(400).json({
+      success: false,
+      message: 'Missing stop_id or new_name in request body'
+    });
+  }
 
-
-
-
-
-// Get stop times for a specific trip
-// export const getStopTimesByTripId = async (req, res) => {
-//   const { tripId } = req.params;
-  
-//   try {
-//     // Get all stop_times for this trip
-//     const stopTimeKeys = await client.keys(`stop_time:${tripId}_*`);
-//     const stopTimes = await Promise.all(stopTimeKeys.map(key => client.hGetAll(key)));
-    
-//     // Get trip details
-//     const trip = await client.hGetAll(`trip:${tripId}`);
-    
-//     if (!trip || Object.keys(trip).length === 0) {
-//       return res.status(404).json({ error: 'Trip not found' });
-//     }
-    
-//     // Get route details
-//     const route = await client.hGetAll(`route:${trip.route_id}`);
-    
-//     // Get stop details for each stop time
-//     const stopDetails = await Promise.all(
-//       stopTimes.map(async (stopTime) => {
-//         const stop = await client.hGetAll(`stop:${stopTime.stop_id}`);
-//         return {
-//           ...stopTime,
-//           stop_name: stop.stop_name,
-//           stop_lat: stop.stop_lat,
-//           stop_lon: stop.stop_lon
-//         };
-//       })
-//     );
-    
-//     // Sort by stop sequence
-//     const sortedStopDetails = stopDetails.sort(
-//       (a, b) => parseInt(a.stop_sequence) - parseInt(b.stop_sequence)
-//     );
-    
-//     res.json({
-//       trip_id: tripId,
-//       route_id: trip.route_id,
-//       route_name: route.route_long_name || route.route_short_name,
-//       stops: sortedStopDetails
-//     });
-    
-//   } catch (error) {
-//     console.error('Error fetching stop times:', error);
-//     res.status(500).json({ error: 'Internal Server Error' });
-//   }
-// };
-
-// Get stop times for a specific trip
-export const getStopTimesByTripId = async (req, res) => {
-    const { tripId } = req.params;
-  
-    try {
-      const stopTimeKey = `stop_time:${tripId}`;
-      const stopTimes = await client.zRange(stopTimeKey, 0, -1, { withScores: true });
-  
-      if (stopTimes.length === 0) {
-        return res.status(404).json({ error: 'No stop times found for this trip' });
-      }
-  
-      // Convert the stop time data from the sorted set
-      const sortedStopDetails = stopTimes.map((stopTimeData, index) => {
-        const stopTime = JSON.parse(stopTimeData);
-        return {
-          ...stopTime,
-          stop_sequence: parseInt(stopTimes[index + 1]) // Get the score (stop_sequence)
-        };
-      });
-  
-      // Get trip and route details
-      // (Your existing implementation for getting trip and route details)
-  
-      res.json({
-        trip_id: tripId,
-        route_id: trip.route_id,
-        route_name: route.route_long_name || route.route_short_name,
-        stops: sortedStopDetails
-      });
-    } catch (error) {
-      console.error('Error fetching stop times:', error);
-      res.status(500).json({ error: 'Internal Server Error' });
-    }
-  };
-// Get complete schedule for a route
-export const getRouteSchedule = async (req, res) => {
-  const { routeId } = req.params;
-  
   try {
-    // Get route details
-    const route = await client.hGetAll(`route:${routeId}`);
-    
-    if (Object.keys(route).length === 0) {
-      return res.status(404).json({ error: 'Route not found' });
+    const result = await Stop.findOneAndUpdate(
+      { stop_id: stop_id },
+      { stop_name: new_name },
+      { new: true, runValidators: true }
+    );
+
+    if (!result) {
+      console.log(`No stop found with ID: ${stop_id}`);
+      return res.status(404).json({
+        success: false,
+        message: 'Stop not found'
+      });
     }
+
+    console.log(`Stop ID ${stop_id} updated to '${new_name}'`);
+    res.json({
+      success: true,
+      message: `Stop ID ${stop_id} updated to '${new_name}'`
+    });
+  } catch (err) {
+    console.error("Error updating stop", err);
+    res.status(500).json({
+      success: false,
+      error: err.message
+    });
+  }
+};
+
+
+export const deleteStopById = async (req, res) => {
+  const { stop_id } = req.params; // Assuming stop_id is passed as a URL parameter
+
+  try {
+      const result = await Stop.deleteOne({ stop_id: stop_id });
+
+      if (result.deletedCount === 0) {
+          return res.status(404).json({
+              success: false,
+              message: 'Stop not found'
+          });
+      }
+
+      res.json({
+          success: true,
+          message: `Stop with ID ${stop_id} has been deleted`
+      });
+  } catch (err) {
+      res.status(500).json({
+          success: false,
+          error: err.message
+      });
+  }
+};
+
+export const getExpiredTickets = async (req, res) => {
+  try {
+    // Get all ticket keys
+    const allTicketKeys = await redisClient.keys('ticket:*');
     
-    // Get all trips for this route
-    const tripKeys = await client.keys(`trip:*`);
-    const trips = await Promise.all(tripKeys.map(key => client.hGetAll(key)));
-    const routeTrips = trips.filter(trip => trip.route_id === routeId);
-    
-    // Get schedule for each trip
-    const tripSchedules = await Promise.all(
-      routeTrips.map(async (trip) => {
-        const stopTimeKeys = await client.keys(`stop_time:${trip.trip_id}_*`);
-        const stopTimes = await Promise.all(stopTimeKeys.map(key => client.hGetAll(key)));
-        
-        // Get stop details for each stop time
-        const stopDetails = await Promise.all(
-          stopTimes.map(async (stopTime) => {
-            const stop = await client.hGetAll(`stop:${stopTime.stop_id}`);
-            return {
-              ...stopTime,
-              stop_name: stop.stop_name,
-              stop_lat: stop.stop_lat,
-              stop_lon: stop.stop_lon
-            };
-          })
-        );
-        
-        return {
-          trip_id: trip.trip_id,
-          service_id: trip.service_id,
-          stops: stopDetails.sort((a, b) => parseInt(a.stop_sequence) - parseInt(b.stop_sequence))
-        };
+    // Fetch the ticket data for each ticketId
+    const expiredTickets = await Promise.all(
+      allTicketKeys.map(async (ticketKey) => {
+        const ticket = await redisClient.hGetAll(ticketKey);
+
+        // Check if ticket has expired
+        const expiredAt = new Date(ticket.expired_at);
+        const currentTime = new Date();
+
+        if (expiredAt < currentTime) {
+          return ticket; // Return the expired ticket
+        }
       })
     );
-    
-    res.json({
-      route_id: routeId,
-      route_name: route.route_long_name || route.route_short_name,
-      route_type: route.route_type,
-      trip_count: tripSchedules.length,
-      trips: tripSchedules
-    });
-    
+
+    // Filter out undefined tickets (non-expired)
+    const validExpiredTickets = expiredTickets.filter(ticket => ticket !== undefined);
+
+    if (validExpiredTickets.length === 0) {
+      return res.status(404).json({ error: 'No expired tickets found' });
+    }
+
+    // Return the expired tickets
+    res.status(200).json(validExpiredTickets);
+
   } catch (error) {
-    console.error('Error fetching route schedule:', error);
-    res.status(500).json({ error: 'Internal Server Error' });
+    console.error('Error retrieving expired tickets:', error);
+    res.status(500).json({ error: `Internal server error: ${error.message}` });
   }
 };
