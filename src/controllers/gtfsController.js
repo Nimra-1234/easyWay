@@ -242,36 +242,57 @@ export const calculateAverageTripDuration = async (req, res) => {
 };
 
 
+// export const getStopTimesByTrip = async (req, res) => {
+//     const { tripId } = req.params;
+//     try {
+//         const stopTimes = await StopTime.aggregate([
+//             { $match: { trip_id: tripId } },
+//             {
+//                 $lookup: {
+//                     from: "stops",
+//                     localField: "stop_id",
+//                     foreignField: "stop_id",
+//                     as: "stopDetails"
+//                 }
+//             },
+//             { $unwind: "$stopDetails" },
+//             {
+//                 $project: {
+//                     arrival_time: 1,
+//                     departure_time: 1,
+//                     stop_sequence: 1,
+//                     stop_name: "$stopDetails.stop_name",
+//                     stop_lat: "$stopDetails.stop_lat",
+//                     stop_lon: "$stopDetails.stop_lon"
+//                 }
+//             },
+//             { $sort: { stop_sequence: 1 } }
+//         ]);
+//         res.json({ success: true, data: stopTimes });
+//     } catch (error) {
+//         res.status(500).json({ success: false, error: error.message });
+//     }
+// };
+
 export const getStopTimesByTrip = async (req, res) => {
-    const { tripId } = req.params;
-    try {
-        const stopTimes = await StopTime.aggregate([
-            { $match: { trip_id: tripId } },
-            {
-                $lookup: {
-                    from: "stops",
-                    localField: "stop_id",
-                    foreignField: "stop_id",
-                    as: "stopDetails"
-                }
-            },
-            { $unwind: "$stopDetails" },
-            {
-                $project: {
-                    arrival_time: 1,
-                    departure_time: 1,
-                    stop_sequence: 1,
-                    stop_name: "$stopDetails.stop_name",
-                    stop_lat: "$stopDetails.stop_lat",
-                    stop_lon: "$stopDetails.stop_lon"
-                }
-            },
-            { $sort: { stop_sequence: 1 } }
-        ]);
-        res.json({ success: true, data: stopTimes });
-    } catch (error) {
-        res.status(500).json({ success: false, error: error.message });
-    }
+  const { tripId } = req.params;
+  try {
+      const stopTimes = await StopTime.find({ trip_id: tripId })
+          .select({
+              arrival_time: 1,
+              departure_time: 1,
+              stop_sequence: 1,
+              'stop_info.stop_name': 1,
+              'stop_info.stop_lat': 1,
+              'stop_info.stop_lon': 1,
+              _id: 0
+          })
+          .sort({ stop_sequence: 1 });
+
+      res.json({ success: true, data: stopTimes });
+  } catch (error) {
+      res.status(500).json({ success: false, error: error.message });
+  }
 };
 
 export const getRoutesActiveOnDays = async (req, res) => {
