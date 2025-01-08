@@ -86,4 +86,5 @@ router.get('/', getAllRoutes);
  */
 router.get('/:id', getRouteById);
 
+
 export default router;

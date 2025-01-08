@@ -1,62 +1,15 @@
 import express from 'express';
-import { getRouteAnalytics, getBusyStops, getRoutesByTripCount,calculateAverageTripDuration,getStopTimesByTrip, getRoutesActiveOnDays} from '../controllers/gtfsController.js';
+import { getBusyStops, calculateTripDuration,getRoutesByTripCount,calculateRouteAverageDuration} from '../controllers/gtfsController.js';
 
 const router = express.Router();
 
-/**
- * @openapi
- * /api/gtfs/routes/analytics:
- *   get:
- *     tags:
- *       - Analytics
- *     summary: Retrieve analytics for GTFS routes.
- *     description: Returns detailed analytics for each route including total trips, unique stops, and service coverage.
- *     responses:
- *       200:
- *         description: Successfully retrieved route analytics.
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                   example: true
- *                 data:
- *                   type: array
- *                   items:
- *                     type: object
- *                     properties:
- *                       _id:
- *                         type: string
- *                         description: Route identifier
- *                         example: "102"
- *                       route_short_name:
- *                         type: string
- *                         example: "10"
- *                       route_long_name:
- *                         type: string
- *                         example: "Airport - Downtown"
- *                       total_trips:
- *                         type: integer
- *                         example: 150
- *                       number_of_stops:
- *                         type: integer
- *                         example: 25
- *                       service_coverage:
- *                         type: number
- *                         example: 6.0
- *       500:
- *         description: Server error
- */
-router.get('/routes/analytics', getRouteAnalytics);
 
 /**
  * @openapi
  * /api/gtfs/stops/busy:
  *   get:
  *     tags:
- *       - Details of Busy Stops
+ *       - Busy Stops
  *     summary: Retrieve information on busy stops.
  *     description: Returns details of the busiest stops based on the number of visits.
  *     parameters:
@@ -96,122 +49,25 @@ router.get('/routes/analytics', getRouteAnalytics);
  */
 router.get('/stops/busy', getBusyStops);
 
-/**
- * @openapi
- * /api/gtfs/routes/tripcount:
- *   get:
- *     tags:
- *       - RoutesCount
- *     summary: Retrieve routes with a specific number of trips.
- *     description: Returns a list of routes that have exactly the specified number of trips.
- *     parameters:
- *       - in: query
- *         name: tripcount
- *         schema:
- *           type: integer
- *         required: true
- *         description: The exact number of trips to filter the routes by.
- *     responses:
- *       200:
- *         description: Successfully retrieved routes.
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                   example: true
- *                 data:
- *                   type: array
- *                   items:
- *                     type: object
- *                     properties:
- *                       _id:
- *                         type: string
- *                         description: Route identifier
- *                         example: "102"
- *                       route_short_name:
- *                         type: string
- *                         example: "10"
- *                       route_long_name:
- *                         type: string
- *                         example: "Airport - Downtown"
- *                       total_trips:
- *                         type: integer
- *                         example: 50
- *       400:
- *         description: Invalid trip count specified
- *       500:
- *         description: Server error
- */
-router.get('/routes/tripcount', getRoutesByTripCount);
+
 
 /**
  * @swagger
- * /api/gtfs/routes/{routeId}/average-duration:
+ * /api/gtfs/trips/{tripId}/duration:
  *   get:
- *     summary: Calculate average trip duration for a specific route
+ *     summary: Calculate duration for a specific trip
  *     tags: [Trip Duration]
- *     description: Returns the average duration of all trips associated with a specific route ID.
- *     parameters:
- *       - in: path
- *         name: routeId
- *         required: true
- *         schema:
- *           type: string
- *         description: The ID of the route
- *     responses:
- *       200:
- *         description: Average duration of trips for the route
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                   example: true
- *                 data:
- *                   type: array
- *                   items:
- *                     type: object
- *                     properties:
- *                       _id:
- *                         type: string
- *                         description: The route ID
- *                         example: "100"
- *                       averageDuration:
- *                         type: number
- *                         description: The average duration of trips in minutes
- *                         example: 120
- *       400:
- *         description: Invalid input, object invalid
- *       500:
- *         description: Error occurred while calculating average duration
- */
-
-
-router.get('/routes/:routeId/average-duration', calculateAverageTripDuration);
-
-/**
- * @openapi
- * /api/gtfs/trips/{tripId}/stop-times:
- *   get:
- *     tags:
- *       - Stop Times by trip
- *     summary: Retrieve stop times for a specific trip.
- *     description: Returns a list of stop times ordered by stop sequence for a given trip ID.
+ *     description: Returns the duration and stop details for a specific trip ID
  *     parameters:
  *       - in: path
  *         name: tripId
  *         required: true
  *         schema:
  *           type: string
- *         description: The ID of the trip to retrieve stop times for.
+ *         description: The ID of the trip (e.g., "1#1-2")
  *     responses:
  *       200:
- *         description: Successfully retrieved stop times.
+ *         description: Trip duration successfully calculated
  *         content:
  *           application/json:
  *             schema:
@@ -221,38 +77,82 @@ router.get('/routes/:routeId/average-duration', calculateAverageTripDuration);
  *                   type: boolean
  *                   example: true
  *                 data:
- *                   type: array
- *                   items:
- *                     $ref: '#/components/schemas/StopTime'
+ *                   type: object
+ *                   properties:
+ *                     tripId:
+ *                       type: string
+ *                       description: The trip identifier
+ *                       example: "1#1-2"
+ *                     duration:
+ *                       type: object
+ *                       properties:
+ *                         minutes:
+ *                           type: number
+ *                           description: Trip duration in minutes
+ *                           example: 45.5
+ *                         seconds:
+ *                           type: number
+ *                           description: Trip duration in seconds
+ *                           example: 2730
+ *                     route:
+ *                       type: object
+ *                       properties:
+ *                         firstStop:
+ *                           type: string
+ *                           description: Name of the first stop
+ *                           example: "TOR VERGATA/SCHIAVONETTI"
+ *                         lastStop:
+ *                           type: string
+ *                           description: Name of the last stop
+ *                           example: "TERMINI (MA-MB-FS)"
+ *                         startTime:
+ *                           type: string
+ *                           description: Trip start time
+ *                           example: "07:28:00"
+ *                         endTime:
+ *                           type: string
+ *                           description: Trip end time
+ *                           example: "08:13:00"
  *       404:
- *         description: Trip not found
+ *         description: No stops found for the specified trip
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "No stops found for trip 1#1-2"
  *       500:
- *         description: Server error
+ *         description: Server error while calculating trip duration
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 error:
+ *                   type: string
+ *                   example: "Error calculating trip duration"
  */
 
-
-router.get('/trips/:tripId/stop-times', getStopTimesByTrip);
+router.get('/trips/:tripId/duration', calculateTripDuration);
 
 /**
- * @openapi
- * /api/gtfs/routes/active:
+ * @swagger
+ * /api/gtfs/routes/trip-analysis:
  *   get:
- *     tags:
- *       - Active Routes On Days
- *     summary: Retrieve active routes on a specific date.
- *     description: Returns a list of routes that are active on the provided date. The date should be in YYYYMMDD format.
- *     parameters:
- *       - in: query
- *         name: date
- *         schema:
- *           type: string
- *           format: date
- *           example: '20241223'
- *         required: true
- *         description: The date to check for active routes, formatted as YYYYMMDD.
+ *     summary: Get routes with highest and lowest number of trips
+ *     tags: [RouteRanking - Highest and Lowest trips]
+ *     description: Retrieves information about routes with the most and least number of trips
  *     responses:
  *       200:
- *         description: Successfully retrieved list of active routes.
+ *         description: Successfully retrieved route analysis
  *         content:
  *           application/json:
  *             schema:
@@ -262,28 +162,174 @@ router.get('/trips/:tripId/stop-times', getStopTimesByTrip);
  *                   type: boolean
  *                   example: true
  *                 data:
- *                   type: array
- *                   items:
- *                     type: object
- *                     properties:
- *                       route_id:
- *                         type: string
- *                         example: "102"
- *                       route_short_name:
- *                         type: string
- *                         example: "10"
- *                       route_long_name:
- *                         type: string
- *                         example: "Airport - Downtown"
- *                       is_active:
- *                         type: boolean
- *                         example: true
- *       400:
- *         description: Bad request, possible incorrect date format.
+ *                   type: object
+ *                   properties:
+ *                     largest_route:
+ *                       type: object
+ *                       properties:
+ *                         route_id:
+ *                           type: string
+ *                           example: "211"
+ *                         route_name:
+ *                           type: string
+ *                           example: "211"
+ *                         trip_count:
+ *                           type: number
+ *                           example: 150
+ *                     smallest_route:
+ *                       type: object
+ *                       properties:
+ *                         route_id:
+ *                           type: string
+ *                           example: "C2"
+ *                         route_name:
+ *                           type: string
+ *                           example: "C2"
+ *                         trip_count:
+ *                           type: number
+ *                           example: 25
+ *       404:
+ *         description: No routes found
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "No routes found"
  *       500:
  *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 error:
+ *                   type: string
+ *                   example: "Error analyzing routes"
  */
-router.get('/routes/active', getRoutesActiveOnDays);
+router.get('/routes/trip-analysis', getRoutesByTripCount);
 
+
+/**
+ * @swagger
+ * /api/gtfs/routes/{routeId}/average-duration:
+ *   get:
+ *     summary: Calculate average duration for all trips in a route
+ *     description: Retrieves average, minimum, and maximum durations for trips grouped by direction and headsign
+ *     tags:
+ *       - Routes Average Duration
+ *     parameters:
+ *       - in: path
+ *         name: routeId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: The route ID (e.g., "T01")
+ *         example: "T01"
+ *     responses:
+ *       200:
+ *         description: Successfully retrieved route duration statistics
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     routeId:
+ *                       type: string
+ *                       example: "T01"
+ *                     directions:
+ *                       type: array
+ *                       items:
+ *                         type: object
+ *                         properties:
+ *                           direction:
+ *                             type: number
+ *                             example: 0
+ *                           headsign:
+ *                             type: string
+ *                             example: "TUSCOLANA/ANAGNINA"
+ *                           statistics:
+ *                             type: object
+ *                             properties:
+ *                               averageDuration:
+ *                                 type: number
+ *                                 example: 72.5
+ *                               minDuration:
+ *                                 type: number
+ *                                 example: 65.0
+ *                               maxDuration:
+ *                                 type: number
+ *                                 example: 80.0
+ *                               totalTrips:
+ *                                 type: number
+ *                                 example: 25
+ *                           trips:
+ *                             type: array
+ *                             items:
+ *                               type: object
+ *                               properties:
+ *                                 tripId:
+ *                                   type: string
+ *                                   example: "1#1-2"
+ *                                 duration:
+ *                                   type: number
+ *                                   example: 70.0
+ *                                 totalStops:
+ *                                   type: number
+ *                                   example: 15
+ *                                 firstStop:
+ *                                   type: string
+ *                                   example: "TOR VERGATA/SCHIAVONETTI"
+ *                                 lastStop:
+ *                                   type: string
+ *                                   example: "CIMITERO LAURENTINO"
+ *                                 startTime:
+ *                                   type: string
+ *                                   example: "07:28:00"
+ *                                 endTime:
+ *                                   type: string
+ *                                   example: "08:38:00"
+ *       404:
+ *         description: No trips found for the specified route
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "No trips found for route T01"
+ *       500:
+ *         description: Server error while calculating route duration
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 error:
+ *                   type: string
+ *                   example: "Error calculating route average duration"
+ */
+router.get('/routes/:routeId/average-duration', calculateRouteAverageDuration);
 
 export default router;

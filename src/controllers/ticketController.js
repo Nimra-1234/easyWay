@@ -80,7 +80,6 @@ export const getUserTickets = async (req, res) => {
   }
 };
 
-// Get ticket details by ticket ID
 export const getTicket = async (req, res) => {
     const { ticketId } = req.params;
 
@@ -91,77 +90,88 @@ export const getTicket = async (req, res) => {
             return res.status(404).json({ error: 'Ticket not found' });
         }
 
+        // Check if ticket is expired
+        const expiredAt = new Date(ticket.expired_at);
+        const currentTime = new Date();
+
+        if (expiredAt < currentTime && ticket.status !== 'expired') {
+            // Update ticket status to expired
+            const updatedTicket = {
+                ...ticket,
+                status: 'expired'
+            };
+            await redisClient.hSet(`ticket:${ticketId}`, updatedTicket);
+            return res.status(200).json(updatedTicket);
+        }
+
         res.status(200).json(ticket);
     } catch (error) {
         console.error('Error retrieving ticket:', error);
         res.status(500).json({ error: `Internal server error: ${error.message}` });
     }
 };
-
 export const getExpiredTickets = async (req, res) => {
     try {
-      const allTicketKeys = await redisClient.keys('ticket:*');
-      const expiredTickets = await Promise.all(
-        allTicketKeys.map(async (ticketKey) => {
-          const ticket = await redisClient.hGetAll(ticketKey);
-          const expiredAt = new Date(ticket.expired_at || 0);
-          const currentTime = new Date();
-  
-          if (expiredAt < currentTime) {
-            return ticket;
-          }
-        })
-      );
+        console.log('Fetching expired tickets...');
+        
+        // Get all ticket keys
+        const allTicketKeys = await redisClient.keys('ticket:*');
+        console.log(`Found ${allTicketKeys.length} total tickets`);
+        
+        const currentTime = new Date();
+        
+        // Process all tickets
+        const expiredTickets = await Promise.all(
+            allTicketKeys.map(async (ticketKey) => {
+                const ticket = await redisClient.hGetAll(ticketKey);
+                
+                // Skip if ticket data is empty
+                if (Object.keys(ticket).length === 0) return null;
+                
+                const expiredAt = new Date(ticket.expired_at);
+                
+                // Check if ticket is expired
+                if (expiredAt < currentTime) {
+                    // Update status if not already expired
+                    if (ticket.status !== 'expired') {
+                        const updatedTicket = {
+                            ...ticket,
+                            status: 'expired'
+                        };
+                        await redisClient.hSet(ticketKey, updatedTicket);
+                        console.log(`Updated ticket ${ticket.ticketId} to expired status`);
+                        return updatedTicket;
+                    }
+                    return ticket;
+                }
+                return null;
+            })
+        );
 
-      const validExpiredTickets = expiredTickets.filter(ticket => ticket);
+        // Filter out null values and get only expired tickets
+        const validExpiredTickets = expiredTickets.filter(ticket => ticket !== null);
+        
+        console.log(`Found ${validExpiredTickets.length} expired tickets`);
 
-      if (validExpiredTickets.length === 0) {
-        return res.status(404).json({ error: 'No expired tickets found' });
-      }
-  
-      res.status(200).json(validExpiredTickets);
+        if (validExpiredTickets.length === 0) {
+            return res.status(404).json({ 
+                success: false,
+                message: 'No expired tickets found'
+            });
+        }
+
+        res.status(200).json({
+            success: true,
+            count: validExpiredTickets.length,
+            data: validExpiredTickets
+        });
+        
     } catch (error) {
-      console.error('Error retrieving expired tickets:', error);
-      res.status(500).json({ error: `Internal server error: ${error.message}` });
+        console.error('Error retrieving expired tickets:', error);
+        res.status(500).json({ 
+            success: false,
+            message: "Error retrieving expired tickets",
+            error: error.message
+        });
     }
 };
-
-
-
-  
-
-// export const getExpiredTickets = async (req, res) => {
-//     try {
-//       // Get all ticket keys
-//       const allTicketKeys = await redisClient.keys('ticket:*');
-      
-//       // Fetch the ticket data for each ticketId
-//       const expiredTickets = await Promise.all(
-//         allTicketKeys.map(async (ticketKey) => {
-//           const ticket = await redisClient.hGetAll(ticketKey);
-  
-//           // Check if ticket has expired
-//           const expiredAt = new Date(ticket.expired_at);
-//           const currentTime = new Date();
-  
-//           if (expiredAt < currentTime) {
-//             return ticket; // Return the expired ticket
-//           }
-//         })
-//       );
-  
-//       // Filter out undefined tickets (non-expired)
-//       const validExpiredTickets = expiredTickets.filter(ticket => ticket !== undefined);
-  
-//       if (validExpiredTickets.length === 0) {
-//         return res.status(404).json({ error: 'No expired tickets found' });
-//       }
-  
-//       // Return the expired tickets
-//       res.status(200).json(validExpiredTickets);
-  
-//     } catch (error) {
-//       console.error('Error retrieving expired tickets:', error);
-//       res.status(500).json({ error: `Internal server error: ${error.message}` });
-//     }
-//   };

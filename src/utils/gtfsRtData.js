@@ -5,8 +5,7 @@ import client from '../config/redisClient.js';
 
 const FEEDS = {
     vehiclePositions: 'https://romamobilita.it/sites/default/files/rome_rtgtfs_vehicle_positions_feed.pb',
-    tripUpdates: 'https://romamobilita.it/sites/default/files/rome_rtgtfs_trip_updates_feed.pb',
-    alerts: 'https://romamobilita.it/sites/default/files/rome_rtgtfs_service_alerts_feed.pb'
+    tripUpdates: 'https://romamobilita.it/sites/default/files/rome_rtgtfs_trip_updates_feed.pb'
 };
 
 async function loadSchema() {
@@ -82,33 +81,6 @@ async function processTripUpdates(decodedData) {
     console.log(`Processed ${count} trip updates`);
 }
 
-async function processAlerts(decodedData) {
-    let count = 0;
-    for (const entity of decodedData.entity) {
-        if (entity.alert) {
-            const alert = entity.alert;
-            const alertId = entity.id || `alert_${Date.now()}`;
-
-            const alertData = {
-                id: alertId,
-                effect: alert.effect || '',
-                header_text: alert.headerText?.translation?.[0]?.text || '',
-                description_text: alert.descriptionText?.translation?.[0]?.text || '',
-                start_time: alert.activePeriod?.[0]?.start?.toString() || '',
-                end_time: alert.activePeriod?.[0]?.end?.toString() || '',
-                severity_level: alert.severityLevel || '',
-                informed_entity: JSON.stringify(alert.informedEntity || []),
-                timestamp: Date.now().toString()
-            };
-
-            await client.hSet(`alert:${alertId}`, alertData);
-            await client.sAdd('active_alerts', alertId);
-            count++;
-        }
-    }
-    console.log(`Processed ${count} service alerts`);
-}
-
 async function fetchGtfsRtData() {
     try {
         if (!client.isOpen) {
@@ -129,12 +101,7 @@ async function fetchGtfsRtData() {
             // Trip Updates
             fetchAndDecodeFeed(FEEDS.tripUpdates, FeedMessage)
                 .then(data => processTripUpdates(data))
-                .catch(error => console.error('Error processing trip updates:', error)),
-
-            // Service Alerts
-            fetchAndDecodeFeed(FEEDS.alerts, FeedMessage)
-                .then(data => processAlerts(data))
-                .catch(error => console.error('Error processing alerts:', error))
+                .catch(error => console.error('Error processing trip updates:', error))
         ]);
 
         // Single summary log after all feeds are processed

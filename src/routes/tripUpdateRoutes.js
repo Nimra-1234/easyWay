@@ -5,12 +5,12 @@ const router = express.Router();
 
 /**
  * @swagger
- * /api/trip-updates/{tripId}:
+ * /api/trip-update/{tripId}:
  *   get:
  *     summary: Get trip update by tripId
  *     description: Retrieve the details of a trip update by its tripId.
  *     tags:
- *       - RealTime - Trip Updates
+ *       - TripTracker
  *     parameters:
  *       - name: tripId
  *         in: path

@@ -5,103 +5,24 @@ import Stop from '../models/stopModel.js';
 import StopTime from '../models/stopTimeModel.js';
 import Calendar from '../models/calendarModel.js';
 
-export const getRouteAnalytics = async (req, res) => {
-    try {
-      const analytics = await Route.aggregate([
-        {
-          $lookup: {
-            from: "trips",
-            localField: "route_id",
-            foreignField: "route_id",
-            as: "route_trips"
-          }
-        },
-        {
-          $lookup: {
-            from: "stop_times",
-            localField: "route_trips.trip_id",
-            foreignField: "trip_id",
-            as: "trip_stops"
-          }
-        },
-        {
-          $lookup: {
-            from: "stops",
-            localField: "trip_stops.stop_id",
-            foreignField: "stop_id",
-            as: "route_stops"
-          }
-        },
-        {
-          $group: {
-            _id: "$route_id",
-            route_short_name: { $first: "$route_short_name" },
-            route_long_name: { $first: "$route_long_name" },
-            total_trips: { $sum: 1 }, // Assuming each document represents a trip
-            unique_stops: { $addToSet: "$route_stops.stop_name" }
-          }
-        },
-        {
-          $addFields: {
-            number_of_stops: { $size: "$unique_stops" }
-          }
-        },
-        {
-          $addFields: {
-            service_coverage: {
-              $cond: [
-                { $eq: ["$number_of_stops", 0] }, // Avoid division by zero
-                0,
-                { $divide: ["$total_trips", "$number_of_stops"] }
-              ]
-            }
-          }
-        },
-        { $sort: { total_trips: -1 } }
-      ]);
-  
-      res.json({
-        success: true,
-        data: analytics
-      });
-    } catch (error) {
-      res.status(500).json({
-        success: false,
-        error: error.message
-      });
-    }
-  };
-  
-
 export const getBusyStops = async (req, res) => {
   try {
     const limit = parseInt(req.query.limit) || 100;
     const busyStops = await StopTime.aggregate([
       {
         $group: {
-          _id: "$stop_id",
-          total_visits: { $sum: 1 },
-          peak_hours: {
-            $push: {
-              $substr: ["$arrival_time", 0, 2]
-            }
-          }
+          _id: "$stop_info.stop_id",
+          stop_name: { $first: "$stop_info.stop_name" },
+          stop_lat: { $first: "$stop_info.stop_lat" },
+          stop_lon: { $first: "$stop_info.stop_lon" },
+          total_visits: { $sum: 1 }
         }
       },
-      {
-        $lookup: {
-          from: "stops",
-          localField: "_id",
-          foreignField: "stop_id",
-          as: "stop_info"
-        }
-      },
-      { $unwind: "$stop_info" },
       {
         $project: {
-          stop_name: "$stop_info.stop_name",
-          stop_lat: "$stop_info.stop_lat",
-          stop_lon: "$stop_info.stop_lon",
+          stop_name: 1,
+          stop_lat: 1,
+          stop_lon: 1,
           total_visits: 1
         }
       },
@@ -120,278 +41,275 @@ export const getBusyStops = async (req, res) => {
     });
   }
 };
-
-// controllers/gtfsController.js
-
-export const getRoutesByTripCount = async (req, res) => {
-    const tripCount = parseInt(req.query.tripcount);
-    if (isNaN(tripCount)) {
-        return res.status(400).json({ success: false, error: 'Invalid trip count specified' });
-    }
-
-    try {
-        const routes = await Route.aggregate([
-            {
-                $lookup: {
-                    from: "trips",
-                    localField: "route_id",
-                    foreignField: "route_id",
-                    as: "route_trips"
-                }
-            },
-            {
-                $group: {
-                    _id: "$route_id",
-                    route_short_name: { $first: "$route_short_name" },
-                    route_long_name: { $first: "$route_long_name" },
-                    total_trips: { $sum: 1 }
-                }
-            },
-            {
-                $match: {
-                    total_trips: tripCount
-                }
-            },
-            // Debugging output to understand what the aggregation pipeline produces
-            {
-                $project: {
-                    debug: "$$ROOT"
-                }
-            }
-        ]);
-
-        console.log(routes); // Check the output in your server logs
-
-        res.json({
-            success: true,
-            data: routes
-        });
-    } catch (error) {
-        res.status(500).json({
-            success: false,
-            error: error.message
-        });
-    }
-};
-
-
-export const calculateAverageTripDuration = async (req, res) => {
-    const { routeId } = req.params;
-
-    try {
-        const averageDuration = await Trip.aggregate([
-            {
-                $match: {
-                    route_id: routeId
-                }
-            },
-            {
-                $lookup: {
-                    from: "stoptimes",
-                    localField: "trip_id",
-                    foreignField: "trip_id",
-                    as: "stop_times"
-                }
-            },
-            {
-                $unwind: "$stop_times" // Ensure you are manipulating each stop_time individually
-            },
-            {
-                $project: {
-                    departure_seconds: {
-                        $sum: [
-                            { $multiply: [{ $toInt: { $substr: ["$stop_times.departure_time", 0, 2] } }, 3600] }, // hours to seconds
-                            { $multiply: [{ $toInt: { $substr: ["$stop_times.departure_time", 3, 2] } }, 60] },   // minutes to seconds
-                            { $toInt: { $substr: ["$stop_times.departure_time", 6, 2] } }                      // seconds
-                        ]
-                    },
-                    arrival_seconds: {
-                        $sum: [
-                            { $multiply: [{ $toInt: { $substr: ["$stop_times.arrival_time", 0, 2] } }, 3600] }, // hours to seconds
-                            { $multiply: [{ $toInt: { $substr: ["$stop_times.arrival_time", 3, 2] } }, 60] },   // minutes to seconds
-                            { $toInt: { $substr: ["$stop_times.arrival_time", 6, 2] } }                      // seconds
-                        ]
-                    }
-                }
-            },
-            {
-                $group: {
-                    _id: "$route_id",
-                    totalDuration: { $sum: { $subtract: ["$departure_seconds", "$arrival_seconds"] } },
-                    count: { $sum: 1 }
-                }
-            },
-            {
-                $project: {
-                    averageDuration: { $divide: ["$totalDuration", "$count"] }
-                }
-            }
-        ]);
-
-        res.json({
-            success: true,
-            data: averageDuration
-        });
-    } catch (error) {
-        console.error("Error calculating average trip duration:", error);
-        res.status(500).json({
-            success: false,
-            error: error.message
-        });
-    }
-};
-
-
-// export const getStopTimesByTrip = async (req, res) => {
-//     const { tripId } = req.params;
-//     try {
-//         const stopTimes = await StopTime.aggregate([
-//             { $match: { trip_id: tripId } },
-//             {
-//                 $lookup: {
-//                     from: "stops",
-//                     localField: "stop_id",
-//                     foreignField: "stop_id",
-//                     as: "stopDetails"
-//                 }
-//             },
-//             { $unwind: "$stopDetails" },
-//             {
-//                 $project: {
-//                     arrival_time: 1,
-//                     departure_time: 1,
-//                     stop_sequence: 1,
-//                     stop_name: "$stopDetails.stop_name",
-//                     stop_lat: "$stopDetails.stop_lat",
-//                     stop_lon: "$stopDetails.stop_lon"
-//                 }
-//             },
-//             { $sort: { stop_sequence: 1 } }
-//         ]);
-//         res.json({ success: true, data: stopTimes });
-//     } catch (error) {
-//         res.status(500).json({ success: false, error: error.message });
-//     }
-// };
-
-export const getStopTimesByTrip = async (req, res) => {
+export const calculateTripDuration = async (req, res) => {
   const { tripId } = req.params;
+
   try {
-      const stopTimes = await StopTime.find({ trip_id: tripId })
-          .select({
-              arrival_time: 1,
-              departure_time: 1,
-              stop_sequence: 1,
-              'stop_info.stop_name': 1,
-              'stop_info.stop_lat': 1,
-              'stop_info.stop_lon': 1,
-              _id: 0
-          })
-          .sort({ stop_sequence: 1 });
-
-      res.json({ success: true, data: stopTimes });
-  } catch (error) {
-      res.status(500).json({ success: false, error: error.message });
-  }
-};
-
-export const getRoutesActiveOnDays = async (req, res) => {
-  try {
-      const { date } = req.query; // Expect date in YYYYMMDD format
-      if (!date || !/^\d{8}$/.test(date)) {
-          throw new Error('Invalid date format. Please use YYYYMMDD format');
-      }
-
-      const pipeline = [
-          // Start with routes
-          {
-              $lookup: {
-                  from: "trips",
-                  localField: "route_id",
-                  foreignField: "route_id",
-                  as: "route_trips"
-              }
-          },
-          // Unwind the trips
-          {
-              $unwind: "$route_trips"
-          },
-          // Lookup calendar_dates for exceptions
-          {
-              $lookup: {
-                  from: "calendar_dates",
-                  let: { serviceId: "$route_trips.service_id" },
-                  pipeline: [
-                      {
-                          $match: {
-                              $expr: {
-                                  $and: [
-                                      { $eq: ["$service_id", "$$serviceId"] },
-                                      { $eq: ["$date", date] }
-                                  ]
-                              }
-                          }
-                      }
-                  ],
-                  as: "exceptions"
-              }
-          },
-          // Filter based on exceptions
+      const averageDuration = await StopTime.aggregate([
           {
               $match: {
-                  $or: [
-                      // Include services that are added on this date
-                      {
-                          "exceptions": {
-                              $elemMatch: {
-                                  exception_type: 1
-                              }
-                          }
-                      },
-                      // Include regular services that aren't removed on this date
-                      {
-                          $and: [
-                              { "exceptions": { $not: { $elemMatch: { exception_type: 2 } } } },
-                              // Add any additional regular service day conditions here if needed
-                          ]
-                      }
-                  ]
+                  trip_id: tripId  // Exact match for trip_id
               }
           },
-          // Group by route to remove duplicates
+          {
+              $sort: { 
+                  stop_sequence: 1 
+              }
+          },
+          {
+              $group: {
+                  _id: "$trip_id",
+                  firstStop: {
+                      $first: {
+                          time: "$arrival_time",
+                          stop_name: "$stop_info.stop_name"
+                      }
+                  },
+                  lastStop: {
+                      $last: {
+                          time: "$departure_time",
+                          stop_name: "$stop_info.stop_name"
+                      }
+                  }
+              }
+          },
+          {
+              $project: {
+                  duration: {
+                      $let: {
+                          vars: {
+                              startTime: { $split: ["$firstStop.time", ":"] },
+                              endTime: { $split: ["$lastStop.time", ":"] }
+                          },
+                          in: {
+                              $subtract: [
+                                  {
+                                      $sum: [ 
+                                          { $multiply: [{ $toInt: { $arrayElemAt: ["$$endTime", 1] } }, 60] },
+                                          { $toInt: { $arrayElemAt: ["$$endTime", 2] } }
+                                      ]
+                                  },
+                                  {
+                                      $sum: [
+                                          { $multiply: [{ $toInt: { $arrayElemAt: ["$$startTime", 1] } }, 60] },
+                                          { $toInt: { $arrayElemAt: ["$$startTime", 2] } }
+                                      ]
+                                  }
+                              ]
+                          }
+                      }
+                  },
+                  firstStopName: "$firstStop.stop_name",
+                  lastStopName: "$lastStop.stop_name",
+                  startTime: "$firstStop.time",
+                  endTime: "$lastStop.time"
+              }
+          },
+          {
+              $project: {
+                  _id: 0,
+                  tripId: "$_id",
+                  duration: {
+                      minutes: { $round: [{ $divide: ["$duration", 60] }, 1] },
+                  },
+                  route: {
+                      firstStop: "$firstStopName",
+                      lastStop: "$lastStopName",
+                      startTime: "$startTime",
+                      endTime: "$endTime"
+                  }
+              }
+          }
+      ]);
+
+      if (!averageDuration.length) {
+          return res.status(404).json({
+              success: false,
+              message: `No stops found for trip ${tripId}`
+          });
+      }
+
+      res.json({
+          success: true,
+          data: averageDuration[0]
+      });
+  } catch (error) {
+      console.error("Error calculating trip duration:", error);
+      res.status(500).json({
+          success: false,
+          error: error.message
+      });
+  }
+};
+export const getRoutesByTripCount = async (req, res) => {
+  try {
+      const routeAnalysis = await Trip.aggregate([
+          // Group by route and count trips
           {
               $group: {
                   _id: "$route_id",
-                  route_short_name: { $first: "$route_short_name" },
-                  route_long_name: { $first: "$route_long_name" },
-                  route_type: { $first: "$route_type" },
-                  service_ids: { $addToSet: "$route_trips.service_id" }
+                  trip_count: { $sum: 1 },
+                  route_name: { $first: "$route_info.route_short_name" }
               }
           },
-          // Final projection
+          // Format output
           {
               $project: {
                   _id: 0,
                   route_id: "$_id",
-                  route_short_name: 1,
-                  route_long_name: 1,
-                  route_type: 1,
-                  service_ids: 1
+                  route_name: 1,
+                  trip_count: 1
+              }
+          },
+          // Sort by trip count
+          { $sort: { trip_count: -1 } }
+      ]);
+
+      if (!routeAnalysis.length) {
+          return res.status(404).json({
+              success: false,
+              message: "No routes found"
+          });
+      }
+
+      // Get largest and smallest routes
+      const result = {
+          largest_route: routeAnalysis[0],
+          smallest_route: routeAnalysis[routeAnalysis.length - 1]
+      };
+
+      res.json({
+          success: true,
+          data: result
+      });
+
+  } catch (error) {
+      console.error("Error analyzing routes:", error);
+      res.status(500).json({
+          success: false,
+          error: error.message
+      });
+  }
+};
+
+
+export const calculateRouteAverageDuration = async (req, res) => {
+  const { routeId } = req.params;
+
+  try {
+      const routeAnalysis = await Trip.aggregate([
+          {
+              $match: { 
+                  route_id: routeId 
+              }
+          },
+          {
+              $lookup: {
+                  from: "stoptimes",
+                  let: { tripId: "$trip_id" },
+                  pipeline: [
+                      { 
+                          $match: { 
+                              $expr: { $eq: ["$trip_id", "$$tripId"] }
+                          }
+                      },
+                      { $sort: { stop_sequence: 1 } }
+                  ],
+                  as: "stops"
+              }
+          },
+          {
+              $match: {
+                  "stops": { $ne: [] }
+              }
+          },
+          {
+              $project: {
+                  firstStop: { 
+                      arrival_time: { $arrayElemAt: ["$stops.arrival_time", 0] }
+                  },
+                  lastStop: { 
+                      departure_time: { $arrayElemAt: ["$stops.departure_time", -1] }
+                  }
+              }
+          },
+          {
+              $addFields: {
+                  startTimeArray: { $split: ["$firstStop.arrival_time", ":"] },
+                  endTimeArray: { $split: ["$lastStop.departure_time", ":"] }
+              }
+          },
+          {
+              $addFields: {
+                  startMinutes: {
+                      $sum: [
+                          { $multiply: [{ $toInt: { $arrayElemAt: ["$startTimeArray", 0] } }, 60] },
+                          { $toInt: { $arrayElemAt: ["$startTimeArray", 1] } }
+                      ]
+                  },
+                  endMinutes: {
+                      $sum: [
+                          { $multiply: [{ $toInt: { $arrayElemAt: ["$endTimeArray", 0] } }, 60] },
+                          { $toInt: { $arrayElemAt: ["$endTimeArray", 1] } }
+                      ]
+                  }
+              }
+          },
+          {
+              $addFields: {
+                  duration: {
+                      $cond: {
+                          if: { $lt: ["$endMinutes", "$startMinutes"] },
+                          then: { 
+                              $add: [
+                                  { $subtract: [1440, "$startMinutes"] },
+                                  "$endMinutes"
+                              ]
+                          },
+                          else: { $subtract: ["$endMinutes", "$startMinutes"] }
+                      }
+                  }
+              }
+          },
+          {
+              $group: {
+                  _id: null,
+                  averageDuration: { $avg: "$duration" },
+                  totalDuration: { $sum: "$duration" },
+                  totalTrips: { $sum: 1 }
+              }
+          },
+          {
+              $project: {
+                  _id: 0,
+                  totalTrips: 1,
+                  totalDuration: { $round: ["$totalDuration", 1] },
+                  averageDuration: { $round: ["$averageDuration", 1] }
               }
           }
-      ];
+      ]);
 
-      const db = req.app.locals.db;
-      const routes = await db.collection('routes').aggregate(pipeline).toArray();
-      
+      if (!routeAnalysis.length) {
+          return res.status(404).json({
+              success: false,
+              message: `No trip data found for route ${routeId}`
+          });
+      }
+
       res.json({
-          status: 'success',
-          data: routes
+          success: true,
+          data: {
+              routeId,
+              ...routeAnalysis[0]
+          }
       });
+
   } catch (error) {
+      console.error('Error calculating route average duration:', error);
       res.status(500).json({
-          status: 'error',
-          message: error.message
+          success: false,
+          message: "Error calculating route average duration",
+          error: error.message
       });
   }
 };

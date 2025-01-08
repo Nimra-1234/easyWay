@@ -7,7 +7,6 @@ import tripRoutes from './src/routes/tripRoutes.js';    // Import trip routes
 import stopRoutes from './src/routes/stopRoutes.js';   // Import stop routes
 import ticketRoutes from './src/routes/ticketRoutes.js';
 import vehicleRoutes from './src/routes/vehicleRoutes.js';
-import alertRoutes from './src/routes/alertRoutes.js';
 import tripUpdateRoutes from './src/routes/tripUpdateRoutes.js';
 import gtfsRoutes from './src/routes/gtfsRoutes.js';
 import swaggerUi from 'swagger-ui-express';
@@ -35,8 +34,7 @@ app.use('/api/routes', routeRoutes);  // Register route routes under /api/routes
 app.use('/api/trips', tripRoutes);    // Register trip routes under /api/trips
 app.use('/api/stops', stopRoutes);    // Register stop routes under /api/stops
 app.use('/api', vehicleRoutes); 
-app.use('/api/alerts', alertRoutes);
-app.use('/api/trip-updates', tripUpdateRoutes);
+app.use('/api/trip-update', tripUpdateRoutes);
 app.disable('etag');
 
 // Swagger setup
