@@ -1,3 +1,4 @@
+import admZip from 'adm-zip';
 import csv from 'csv-parser';
 import fs from 'fs';
 import path from 'path';
@@ -9,12 +10,14 @@ import Stop from '../models/stopModel.js';
 import Trip from '../models/tripModel.js';
 import StopTime from '../models/stopTimeModel.js';
 
+// Get the directory path for ES modules
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-// Resolve the dataset path relative to the project root
 const projectRoot = path.resolve(__dirname, '../..');
-const datasetPath = path.join(projectRoot, 'rome_dataset');
+const zipFilePath = path.join(projectRoot, 'rome_dataset.zip');
+const datasetPath = path.join(projectRoot, 'dataset');
+const gtfsPath = path.join(datasetPath, 'rome_dataset');
 
 const config = {
     mongodb: {
@@ -24,28 +27,60 @@ const config = {
     batchSize: 1000
 };
 
-// Validate dataset path and required files
-function validateDatasetPath() {
-    if (!fs.existsSync(datasetPath)) {
-        throw new Error(`Dataset directory not found at: ${datasetPath}`);
-    }
-    console.log('Dataset directory found at:', datasetPath);
-
-    const requiredFiles = ['routes.txt', 'stops.txt', 'trips.txt', 'stop_times.txt'];
-    const missingFiles = requiredFiles.filter(file => !fs.existsSync(path.join(datasetPath, file)));
-    
-    if (missingFiles.length > 0) {
-        throw new Error(`Missing required files: ${missingFiles.join(', ')}`);
-    }
+// Function to extract zip file
+function extractZip(zipPath, extractTo) {
+  try {
+      const zip = new admZip(zipPath);
+      
+      // Log the contents of the zip file
+      console.log('Zip file contents:', zip.getEntries().map(entry => entry.entryName));
+      
+      // Create the dataset directory if it doesn't exist
+      if (!fs.existsSync(extractTo)) {
+          fs.mkdirSync(extractTo, { recursive: true });
+      }
+      
+      zip.extractAllTo(extractTo, true);
+      
+      // Log the contents of the extracted directory
+      console.log('Extracted directory contents:', fs.readdirSync(extractTo));
+      
+      console.log(`Extracted ${zipPath} to ${extractTo}`);
+  } catch (error) {
+      console.error('Error extracting zip file:', error);
+      throw error;
+  }
 }
 
+function validateDatasetPath() {
+  // Check if the zip file exists
+  if (!fs.existsSync(zipFilePath)) {
+      throw new Error(`Zip file not found at ${zipFilePath}`);
+  }
+
+  // If dataset directory doesn't exist or is empty, extract the zip
+  if (!fs.existsSync(datasetPath) || fs.readdirSync(datasetPath).length === 0) {
+      console.log(`Extracting dataset from ${zipFilePath}...`);
+      extractZip(zipFilePath, datasetPath);
+  }
+  
+  console.log('Dataset directory found at:', gtfsPath);
+  console.log('Files in dataset directory:', fs.readdirSync(gtfsPath));
+
+  const requiredFiles = ['routes.txt', 'stops.txt', 'trips.txt', 'stop_times.txt'];
+  const missingFiles = requiredFiles.filter(file => !fs.existsSync(path.join(gtfsPath, file)));
+  
+  if (missingFiles.length > 0) {
+      throw new Error(`Missing required files: ${missingFiles.join(', ')}`);
+  }
+}
 const importData = async (filename, Model, transformFn = null) => {
-    let batch = [];
-    let totalCount = 0;
-    const filePath = path.join(datasetPath, `${filename}.txt`);
-    
-    console.log(`Starting import of ${filename}...`);
-    console.log(`Reading from: ${filePath}`);
+  let batch = [];
+  let totalCount = 0;
+  const filePath = path.join(gtfsPath, `${filename}.txt`); // Update this line
+  
+  console.log(`Starting import of ${filename}...`);
+  console.log(`Reading from: ${filePath}`);
     
     // Verify file exists
     if (!fs.existsSync(filePath)) {
