@@ -132,82 +132,129 @@ const importData = async (filename, Model, transformFn = null) => {
 };
 
 const importGTFSData = async () => {
-    try {
-        // Validate dataset path before connecting to MongoDB
-        validateDatasetPath();
+  try {
+      // Validate dataset path before connecting to MongoDB
+      validateDatasetPath();
 
-        await mongoose.connect(config.mongodb.url, config.mongodb.options);
-        console.log('Connected to MongoDB');
+      await mongoose.connect(config.mongodb.url, config.mongodb.options);
+      console.log('Connected to MongoDB');
 
-        console.log('Clearing existing data...');
-        await Promise.all([
-            Route.deleteMany({}),
-            Stop.deleteMany({}),
-            Trip.deleteMany({}),
-            StopTime.deleteMany({})
-        ]);
+      // Ensure indexes are created before import
+      console.log('Creating indexes...');
+      await Promise.all([
+          StopTime.createIndexes(),
+          Route.createIndexes(),
+          Stop.createIndexes(),
+          Trip.createIndexes()
+      ]);
+      console.log('Indexes created successfully');
 
-        console.log('Importing routes...');
-        await importData('routes', Route);
-        
-        console.log('Importing stops...');
-        await importData('stops', Stop);
+      console.log('Clearing existing data...');
+      await Promise.all([
+          Route.deleteMany({}),
+          Stop.deleteMany({}),
+          Trip.deleteMany({}),
+          StopTime.deleteMany({})
+      ]);
 
-        const stops = await Stop.find({}).lean();
-        const routes = await Route.find({}).lean();
-        const stopsMap = new Map(stops.map(stop => [stop.stop_id, stop]));
-        const routesMap = new Map(routes.map(route => [route.route_id, route]));
+      // Rest of your import code...
+      console.log('Importing routes...');
+      await importData('routes', Route);
+      
+      console.log('Importing stops...');
+      await importData('stops', Stop);
 
-        console.log('Importing trips...');
-        await importData('trips', Trip, (tripData) => {
-            const routeInfo = routesMap.get(tripData.route_id);
-            if (routeInfo) {
-                tripData.route_info = {
-                    route_short_name: routeInfo.route_short_name,
-                    route_long_name: routeInfo.route_long_name,
-                    route_type: routeInfo.route_type
-                };
-            }
-            return tripData;
-        });
+      const stops = await Stop.find({}).lean();
+      const routes = await Route.find({}).lean();
+      const stopsMap = new Map(stops.map(stop => [stop.stop_id, stop]));
+      const routesMap = new Map(routes.map(route => [route.route_id, route]));
 
-        console.log('Importing stop times...');
-        await importData('stop_times', StopTime, (stopTimeData) => {
-            const stopInfo = stopsMap.get(stopTimeData.stop_id);
-            if (stopInfo) {
-                stopTimeData.stop_info = {
-                    stop_id: stopInfo.stop_id,
-                    stop_name: stopInfo.stop_name,
-                    stop_lat: stopInfo.stop_lat,
-                    stop_lon: stopInfo.stop_lon,
-                    zone_id: stopInfo.zone_id,
-                    location_type: stopInfo.location_type
-                };
-            }
-            return stopTimeData;
-        });
+      console.log('Importing trips...');
+      await importData('trips', Trip, (tripData) => {
+          const routeInfo = routesMap.get(tripData.route_id);
+          if (routeInfo) {
+              tripData.route_info = {
+                  route_short_name: routeInfo.route_short_name,
+                  route_long_name: routeInfo.route_long_name,
+                  route_type: routeInfo.route_type
+              };
+          }
+          return tripData;
+      });
 
-        const counts = await Promise.all([
-            Route.countDocuments(),
-            Stop.countDocuments(),
-            Trip.countDocuments(),
-            StopTime.countDocuments()
-        ]);
-        
-        console.log('Final counts:', {
-            Routes: counts[0],
-            Stops: counts[1],
-            Trips: counts[2],
-            'Stop Times': counts[3]
-        });
+      console.log('Importing stop times...');
+      await importData('stop_times', StopTime, (stopTimeData) => {
+          const stopInfo = stopsMap.get(stopTimeData.stop_id);
+          if (stopInfo) {
+              stopTimeData.stop_info = {
+                  stop_id: stopInfo.stop_id,
+                  stop_name: stopInfo.stop_name,
+                  stop_lat: stopInfo.stop_lat,
+                  stop_lon: stopInfo.stop_lon,
+                  zone_id: stopInfo.zone_id,
+                  location_type: stopInfo.location_type
+              };
+          }
+          return stopTimeData;
+      });
 
-    } catch (error) {
-        console.error('Import failed:', error);
-        throw error;
-    } finally {
-        await mongoose.connection.close();
-        console.log('MongoDB connection closed');
-    }
+      // Verify indexes after import with detailed information
+      console.log('\n=== Index Verification ===');
+      const collections = [
+          { model: StopTime, name: 'StopTime' },
+          { model: Route, name: 'Route' },
+          { model: Stop, name: 'Stop' },
+          { model: Trip, name: 'Trip' }
+      ];
+
+      for (const { model, name } of collections) {
+          console.log(`\nVerifying ${name} Collection Indexes:`);
+          const indexes = await model.collection.indexes();
+          
+          if (indexes.length === 0) {
+              console.warn(`⚠️  No indexes found for ${name} collection!`);
+          } else {
+              console.log(`Found ${indexes.length} indexes:`);
+              indexes.forEach((index, i) => {
+                  console.log(`\n  ${i + 1}. Index Details:`);
+                  console.log(`     Name: ${index.name}`);
+                  console.log(`     Keys: ${JSON.stringify(index.key)}`);
+                  console.log(`     Unique: ${index.unique || false}`);
+                  console.log(`     Sparse: ${index.sparse || false}`);
+                  if (index.background) console.log(`     Background: ${index.background}`);
+              });
+          }
+          
+          // Additional verification for expected indexes
+          const expectedIndexes = model.schema.indexes();
+          console.log(`\n  Expected Indexes for ${name}:`, expectedIndexes.length);
+          expectedIndexes.forEach(([keys, options], i) => {
+              console.log(`     ${i + 1}. ${JSON.stringify(keys)} ${JSON.stringify(options)}`);
+          });
+      }
+      console.log('\n=== End Index Verification ===\n');
+
+      const counts = await Promise.all([
+          Route.countDocuments(),
+          Stop.countDocuments(),
+          Trip.countDocuments(),
+          StopTime.countDocuments()
+      ]);
+      
+      console.log('Final counts:', {
+          Routes: counts[0],
+          Stops: counts[1],
+          Trips: counts[2],
+          'Stop Times': counts[3]
+      });
+
+  } catch (error) {
+      console.error('Import failed:', error);
+      throw error;
+  } finally {
+      await mongoose.connection.close();
+      console.log('MongoDB connection closed');
+  }
 };
 
 // Add error handlers for better debugging

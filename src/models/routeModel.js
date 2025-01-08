@@ -1,5 +1,4 @@
 import mongoose from 'mongoose';
-
 const routeSchema = new mongoose.Schema({
     route_id: { type: String, required: true },
     agency_id: String,
