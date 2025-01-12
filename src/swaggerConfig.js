@@ -9,7 +9,7 @@ const app = express();
 const swaggerDefinition = {
   openapi: '3.0.0',
   info: {
-    title: 'Ticketing System API',
+    title: 'EasyWay System API',
     version: '1.0.0',
     description: 'API documentation for the ticketing system',
   },
