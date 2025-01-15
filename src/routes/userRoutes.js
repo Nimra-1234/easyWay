@@ -1,5 +1,5 @@
 import express from 'express';
-import { createUser, getUser, getTicketCount, updateUser, deleteUser } from '../controllers/userController.js'; // Import the user controller functions
+import { createUser, getUser, updateUser, deleteUser } from '../controllers/userController.js'; // Import the user controller functions
 
 const router = express.Router();
 
@@ -59,46 +59,24 @@ router.post('/create', createUser);
  */
 router.get('/:taxCode', getUser);
 
-/**
- * @swagger
- * /api/users/{taxCode}/ticketCount:
- *   get:
- *     summary: Get user's ticket count
- *     description: Fetch the number of tickets a user has purchased by their taxCode.
- *     tags:
- *       - Users
- *     parameters:
- *       - in: path
- *         name: taxCode
- *         required: true
- *         description: The user's taxCode
- *         schema:
- *           type: string
- *     responses:
- *       200:
- *         description: Ticket count returned successfully
- *       404:
- *         description: User not found
- *       500:
- *         description: Internal Server Error
- */
-router.get('/:taxCode/ticketCount', getTicketCount);
 
 /**
  * @swagger
  * /api/users/{taxCode}:
- *   put:
+ *   patch:
  *     summary: Update user details
- *     description: Update user details by taxCode.
+ *     description: Update user details by taxCode. Name and contact are optional - you can update either or both.
  *     tags:
  *       - Users
  *     parameters:
  *       - in: path
  *         name: taxCode
  *         required: true
- *         description: The user's taxCode to update
+ *         description: The user's taxCode to update (14 characters alphanumeric)
  *         schema:
  *           type: string
+ *           pattern: ^[a-zA-Z0-9]{14}$
+ *           example: ABCDEFGHIJKLMN
  *     requestBody:
  *       required: true
  *       content:
@@ -108,19 +86,77 @@ router.get('/:taxCode/ticketCount', getTicketCount);
  *             properties:
  *               name:
  *                 type: string
+ *                 description: User's new name (optional)
+ *                 example: John Doe
  *               contact:
  *                 type: string
+ *                 description: User's new email address (optional)
+ *                 format: email
+ *                 example: john.doe@example.com
+ *             minProperties: 1
+ *           examples:
+ *             nameOnly:
+ *               summary: Update only name
+ *               value:
+ *                 name: John Doe
+ *             contactOnly:
+ *               summary: Update only email
+ *               value:
+ *                 contact: john.doe@example.com
+ *             bothFields:
+ *               summary: Update both fields
+ *               value:
+ *                 name: John Doe
+ *                 contact: john.doe@example.com
  *     responses:
  *       200:
  *         description: User details updated successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                   example: User details updated successfully
+ *                 updatedFields:
+ *                   type: array
+ *                   items:
+ *                     type: string
+ *                     enum: [name, contact]
+ *                   example: ["name", "contact"]
  *       400:
  *         description: Bad Request
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 error:
+ *                   type: string
+ *                   example: Invalid contact format. Must be a valid email address.
  *       404:
  *         description: User not found
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 error:
+ *                   type: string
+ *                   example: User not found
  *       500:
  *         description: Internal Server Error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 error:
+ *                   type: string
+ *                   example: Internal server error
  */
-router.put('/:taxCode', updateUser);
+router.patch('/:taxCode', updateUser);
 
 /**
  * @swagger

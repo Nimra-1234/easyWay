@@ -49,29 +49,57 @@ export const createUser = async (req, res) => {
 
 // Update user details
 export const updateUser = async (req, res) => {
-  const { taxCode } = req.params;  // Extract taxCode from the URL parameter
-  const { name, contact } = req.body;  // Extract name and contact (email) from the request body
+  const { taxCode } = req.params;
+  const { name, contact } = req.body;
 
   try {
-    // Check if the contact (email) is valid
-    if (!emailRegex.test(contact)) {
-      return res.status(400).json({ error: 'Invalid contact format. Must be a valid email address.' });
-    }
-
-    // Fetch the user from Redis using the taxCode
-    const user = await redisClient.hGetAll(`user:${taxCode}`);
-    if (Object.keys(user).length === 0) {
+    // Fetch the existing user from Redis
+    const existingUser = await redisClient.hGetAll(`user:${taxCode}`);
+    if (Object.keys(existingUser).length === 0) {
       return res.status(404).json({ error: 'User not found' });
     }
 
-    // Update the user data in Redis
-    await redisClient.hSet(`user:${taxCode}`, {
-      name,
-      contact,
-      updatedAt: new Date().toISOString(),  // Update the updatedAt field with the current time
-    });
+    // Create an update object with only the provided fields
+    const updates = {
+      updatedAt: new Date().toISOString()
+    };
 
-    res.status(200).json({ message: 'User details updated successfully' });
+    // Track what was actually updated
+    const updateMessages = [];
+
+    // Add name to updates if provided and different from existing
+    if (name !== undefined && name !== existingUser.name) {
+      updates.name = name;
+      updateMessages.push(`Name updated from "${existingUser.name}" to "${name}"`);
+    }
+
+    // Add contact to updates if provided and valid
+    if (contact !== undefined) {
+      if (!emailRegex.test(contact)) {
+        return res.status(400).json({ error: 'Invalid contact format. Must be a valid email address.' });
+      }
+      if (contact !== existingUser.contact) {
+        updates.contact = contact;
+        updateMessages.push(`Contact updated from "${existingUser.contact || 'not set'}" to "${contact}"`);
+      }
+    }
+
+    // If no fields to update were provided or no changes needed
+    if (updateMessages.length === 0) {
+      return res.status(400).json({ 
+        message: 'No changes required',
+        note: 'The provided values are the same as the existing values'
+      });
+    }
+
+    // Update the user data in Redis
+    await redisClient.hSet(`user:${taxCode}`, updates);
+
+    res.status(200).json({
+      message: 'User details updated successfully',
+      updates: updateMessages,
+      updatedFields: Object.keys(updates).filter(key => key !== 'updatedAt')
+    });
   } catch (error) {
     console.error('Error updating user:', error);
     res.status(500).json({ error: 'Internal server error' });
@@ -90,35 +118,6 @@ export const getUser = async (req, res) => {
     }
 
     res.status(200).json(user);  // Respond with the user's details
-  } catch (error) {
-    res.status(500).json({ error: 'Internal server error' });
-  }
-};
-
-// Get ticket count for a user by taxCode
-export const getTicketCount = async (req, res) => {
-  const { taxCode } = req.params;
-
-  try {
-    // Fetch all ticket keys where userId matches taxCode
-    const allTicketKeys = await redisClient.keys('ticket:*');
-    
-    // Filter tickets by userId (taxCode)
-    const userTickets = await Promise.all(
-      allTicketKeys.map(async (ticketKey) => {
-        const ticket = await redisClient.hGetAll(ticketKey);
-        if (ticket.userId === taxCode) {
-          return ticket;  // Return the ticket if it matches the userId
-        }
-      })
-    );
-
-    // Filter out undefined tickets (non-matching tickets)
-    const validUserTickets = userTickets.filter(ticket => ticket !== undefined);
-
-    // Return the count of valid user tickets
-    res.status(200).json({ ticketCount: validUserTickets.length });
-    
   } catch (error) {
     res.status(500).json({ error: 'Internal server error' });
   }

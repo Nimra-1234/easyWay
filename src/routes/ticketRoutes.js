@@ -1,5 +1,9 @@
 import express from 'express';
-import { createTicket, getTicket, getExpiredTickets } from '../controllers/ticketController.js';
+import { 
+    createTicket, 
+    getTicket, 
+    getUserTickets
+} from '../controllers/ticketController.js';
 
 const router = express.Router();
 
@@ -7,62 +11,15 @@ const router = express.Router();
  * @swagger
  * tags:
  *   name: Tickets
- *   description: Operations related to ticketing, including creation and details retrieval.
- */
-/**
- * @swagger
- * /api/tickets/expired:
- *   get:
- *     summary: Get all expired tickets
- *     description: Fetch all tickets that have expired.
- *     tags:
- *       - Tickets
- *     responses:
- *       200:
- *         description: Successfully retrieved the expired tickets.
- *         content:
- *           application/json:
- *             schema:
- *               type: array
- *               items:
- *                 type: object
- *                 properties:
- *                   ticketId:
- *                     type: string
- *                     description: The unique ID for the ticket.
- *                   userId:
- *                     type: string
- *                     description: The taxCode of the user.
- *                   routeId:
- *                     type: string
- *                     description: The route ID for the trip.
- *                   tripId:
- *                     type: string
- *                     description: The trip ID associated with the ticket.
- *                   status:
- *                     type: string
- *                     description: The current status of the ticket (active, expired).
- *                   expired_at:
- *                     type: string
- *                     format: date-time
- *                     description: The timestamp of when the ticket expired.
- *                   createdOn:
- *                     type: string
- *                     format: date-time
- *                     description: The timestamp when the ticket was created.
- *       404:
- *         description: No expired tickets found.
- *       500:
- *         description: Internal Server Error.
+ *   description: Operations related to ticketing, including creation, retrieval, and user statistics
  */
 
-router.get('/expired', getExpiredTickets);
 /**
  * @swagger
  * /api/tickets/create:
  *   post:
  *     summary: Create a new ticket
- *     description: Creates a new ticket for the user by providing details such as the user's name, taxCode, routeId, and tripId.
+ *     description: Creates a new ticket that automatically expires after 70 minutes
  *     tags:
  *       - Tickets
  *     requestBody:
@@ -71,22 +28,28 @@ router.get('/expired', getExpiredTickets);
  *         application/json:
  *           schema:
  *             type: object
+ *             required:
+ *               - name
+ *               - taxCode
+ *               - routeId
+ *               - tripId
  *             properties:
  *               name:
  *                 type: string
- *                 description: The name of the user purchasing the ticket.
+ *                 description: The name of the user purchasing the ticket
  *               taxCode:
  *                 type: string
- *                 description: Unique tax code for the user.
+ *                 description: Unique tax code for the user (14 characters)
+ *                 pattern: ^[a-zA-Z0-9]{14}$
  *               routeId:
  *                 type: string
- *                 description: The ID of the route the user is traveling on.
+ *                 description: The ID of the route
  *               tripId:
  *                 type: string
- *                 description: The ID of the trip for which the ticket is being created.
+ *                 description: The ID of the trip
  *     responses:
  *       201:
- *         description: Successfully created the ticket.
+ *         description: Successfully created the ticket
  *         content:
  *           application/json:
  *             schema:
@@ -94,26 +57,28 @@ router.get('/expired', getExpiredTickets);
  *               properties:
  *                 message:
  *                   type: string
- *                   description: Success message.
  *                 ticket:
  *                   type: object
  *                   properties:
  *                     ticketId:
  *                       type: string
- *                       description: The unique ID for the ticket.
  *                     userId:
  *                       type: string
- *                       description: The taxCode of the user.
  *                     routeId:
  *                       type: string
- *                       description: The route ID for the trip.
  *                     tripId:
  *                       type: string
- *                       description: The trip ID associated with the ticket.
- *       400:
- *         description: Missing required fields (name, taxCode, routeId, tripId).
- *       500:
- *         description: Internal Server Error
+ *                     status:
+ *                       type: string
+ *                     createdAt:
+ *                       type: string
+ *                       format: date-time
+ *                     expired_at:
+ *                       type: string
+ *                       format: date-time
+ *                 expiresIn:
+ *                   type: string
+ *                   example: "4200 seconds"
  */
 router.post('/create', createTicket);
 
@@ -121,20 +86,20 @@ router.post('/create', createTicket);
  * @swagger
  * /api/tickets/{ticketId}:
  *   get:
- *     summary: Get ticket details by ticket ID
- *     description: Retrieve the details of a ticket by its ticket ID.
+ *     summary: Get ticket details
+ *     description: Retrieve ticket details including remaining time before expiration
  *     tags:
  *       - Tickets
  *     parameters:
- *       - name: ticketId
- *         in: path
+ *       - in: path
+ *         name: ticketId
  *         required: true
- *         description: The unique ID of the ticket to retrieve.
  *         schema:
  *           type: string
+ *         description: The ticket's unique identifier
  *     responses:
  *       200:
- *         description: Successfully retrieved the ticket details.
+ *         description: Ticket details retrieved successfully
  *         content:
  *           application/json:
  *             schema:
@@ -142,24 +107,102 @@ router.post('/create', createTicket);
  *               properties:
  *                 ticketId:
  *                   type: string
- *                   description: The unique ID for the ticket.
  *                 userId:
  *                   type: string
- *                   description: The taxCode of the user.
- *                 routeId:
- *                   type: string
- *                   description: The route ID for the trip.
- *                 tripId:
- *                   type: string
- *                   description: The trip ID associated with the ticket.
  *                 status:
  *                   type: string
- *                   description: The current status of the ticket.
+ *                 timeRemaining:
+ *                   type: string
+ *                   example: "3540 seconds"
  *       404:
- *         description: Ticket not found
- *       500:
- *         description: Internal Server Error
+ *         description: Ticket not found or expired
  */
-router.get('/:ticketId', getTicket);  // Uncomment authenticate middleware if needed
+router.get('/:ticketId', getTicket);
+
+/**
+ * @swagger
+ * /api/tickets/user/{taxCode}:
+ *   get:
+ *     summary: Get user's tickets
+ *     description: Retrieve all active tickets and ticket statistics for a user
+ *     tags:
+ *       - Tickets
+ *     parameters:
+ *       - in: path
+ *         name: taxCode
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: User's tax code
+ *     responses:
+ *       200:
+ *         description: Successfully retrieved user's tickets
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 activeTickets:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       ticketId:
+ *                         type: string
+ *                       timeRemaining:
+ *                         type: string
+ *                 totalTicketsPurchased:
+ *                   type: integer
+ *                 activeTicketCount:
+ *                   type: integer
+ */
+router.get('/user/:taxCode', getUserTickets);
+
+// /**
+//  * @swagger
+//  * /api/tickets/user/{taxCode}/stats:
+//  *   get:
+//  *     summary: Get user's ticket statistics
+//  *     description: Retrieve statistics about a user's ticket purchases and usage
+//  *     tags:
+//  *       - Tickets
+//  *     parameters:
+//  *       - in: path
+//  *         name: taxCode
+//  *         required: true
+//  *         schema:
+//  *           type: string
+//  *         description: User's tax code
+//  *     responses:
+//  *       200:
+//  *         description: Successfully retrieved user statistics
+//  *         content:
+//  *           application/json:
+//  *             schema:
+//  *               type: object
+//  *               properties:
+//  *                 user:
+//  *                   type: object
+//  *                   properties:
+//  *                     taxCode:
+//  *                       type: string
+//  *                     name:
+//  *                       type: string
+//  *                     createdAt:
+//  *                       type: string
+//  *                       format: date-time
+//  *                 ticketStats:
+//  *                   type: object
+//  *                   properties:
+//  *                     totalPurchased:
+//  *                       type: integer
+//  *                     activeCount:
+//  *                       type: integer
+//  *                     expiredCount:
+//  *                       type: integer
+//  *       404:
+//  *         description: User not found
+//  */
+// router.get('/user/:taxCode/stats', getUserStats);
 
 export default router;

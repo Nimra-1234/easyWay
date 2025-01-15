@@ -40,6 +40,7 @@ async function processVehiclePositions(decodedData) {
             };
 
             await client.hSet(`vehicle:${vehicleId}`, vehicleData);
+            await client.expire(`vehicle:${vehicleId}`, 3600);
             count++;
         }
     }
