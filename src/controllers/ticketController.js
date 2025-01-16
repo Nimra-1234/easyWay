@@ -1,204 +1,66 @@
-// import redisClient from '../config/redisClient.js';
-// import { v4 as uuidv4 } from 'uuid';
-
-// const TICKET_EXPIRY_SECONDS = 1 * 60; // 70 minutes in seconds
-// const taxCodeRegex = /^[a-zA-Z0-9]{14}$/;
-
-// export const createTicket = async (req, res) => {
-//     const { name, taxCode, routeId, tripId } = req.body;
-  
-//     try {
-//         if (!taxCodeRegex.test(taxCode)) {
-//             return res.status(400).json({ error: 'Invalid tax code format.' });
-//         }
-  
-//         // Get or create user (permanent storage)
-//         let user = await redisClient.hGetAll(`user:${taxCode}`);
-  
-//         if (Object.keys(user).length === 0) {
-//             user = {
-//                 name,
-//                 taxCode,
-//                 createdAt: new Date().toISOString(),
-//                 totalTickets: '0'
-//             };
-//             await redisClient.hSet(`user:${taxCode}`, user);
-//         }
-  
-//         const ticketId = uuidv4();
-//         const expirationTime = new Date(Date.now() + TICKET_EXPIRY_SECONDS * 1000);
-        
-//         const ticket = {
-//             ticketId,
-//             userId: taxCode,
-//             routeId,
-//             tripId,
-//             status: 'active',
-//             createdAt: new Date().toISOString(),
-//             expired_at: expirationTime.toISOString()
-//         };
-
-//         // Store ticket with TTL
-//         await redisClient.hSet(`ticket:${ticketId}`, ticket);
-//         await redisClient.expire(`ticket:${ticketId}`, TICKET_EXPIRY_SECONDS);
-
-//         // Increment total tickets count (permanent)
-//         await redisClient.hIncrBy(`user:${taxCode}`, 'totalTickets', 1);
-
-//         // Increment active tickets counter (with TTL)
-//         const activeCounterKey = `user:${taxCode}:active_count`;
-//         await redisClient.incr(activeCounterKey);
-//         await redisClient.expire(activeCounterKey, TICKET_EXPIRY_SECONDS);
-
-//         console.log('Ticket stored successfully:', ticket);
-  
-//         res.status(201).json({ 
-//             message: 'Ticket created successfully', 
-//             ticket,
-//             expiresIn: `${TICKET_EXPIRY_SECONDS} seconds`
-//         });
-//     } catch (error) {
-//         console.error('Error creating ticket:', error);
-//         res.status(500).json({ error: `Internal server error: ${error.message}` });
-//     }
-// };
-
-// export const getTicket = async (req, res) => {
-//     const { ticketId } = req.params;
-
-//     try {
-//         const ticket = await redisClient.hGetAll(`ticket:${ticketId}`);
-        
-//         if (Object.keys(ticket).length === 0) {
-//             return res.status(404).json({ error: 'Ticket not found or expired' });
-//         }
-
-//         const ttl = await redisClient.ttl(`ticket:${ticketId}`);
-        
-//         res.status(200).json({
-//             ...ticket,
-//             timeRemaining: ttl > 0 ? `${ttl} seconds` : 'expired'
-//         });
-//     } catch (error) {
-//         console.error('Error retrieving ticket:', error);
-//         res.status(500).json({ error: `Internal server error: ${error.message}` });
-//     }
-// };
-
-// export const getUserStats = async (req, res) => {
-//     const { taxCode } = req.params;
-
-//     try {
-//         // Get user data
-//         const user = await redisClient.hGetAll(`user:${taxCode}`);
-//         if (Object.keys(user).length === 0) {
-//             return res.status(404).json({ error: 'User not found' });
-//         }
-
-//         // Get active tickets count
-//         const activeCount = await redisClient.get(`user:${taxCode}:active_count`) || '0';
-//         const totalTickets = parseInt(user.totalTickets || '0');
-
-//         res.status(200).json({
-//             user: {
-//                 taxCode,
-//                 name: user.name,
-//                 createdAt: user.createdAt
-//             },
-//             ticketStats: {
-//                 totalPurchased: totalTickets,
-//                 activeCount: parseInt(activeCount),
-//                 expiredCount: totalTickets - parseInt(activeCount)
-//             }
-//         });
-//     } catch (error) {
-//         console.error('Error retrieving user stats:', error);
-//         res.status(500).json({ error: `Internal server error: ${error.message}` });
-//     }
-// };
-
-// export const getUserTickets = async (req, res) => {
-//     const { taxCode } = req.params;
-
-//     try {
-//         // Get user data
-//         const user = await redisClient.hGetAll(`user:${taxCode}`);
-//         if (Object.keys(user).length === 0) {
-//             return res.status(404).json({ error: 'User not found' });
-//         }
-
-//         // Get counts
-//         const activeCount = await redisClient.get(`user:${taxCode}:active_count`) || '0';
-//         const totalTickets = parseInt(user.totalTickets || '0');
-
-//         res.status(200).json({
-//             taxCode,
-//             name: user.name,
-//             ticketCounts: {
-//                 total: totalTickets,
-//                 active: parseInt(activeCount),
-//                 expired: totalTickets - parseInt(activeCount)
-//             }
-//         });
-//     } catch (error) {
-//         console.error('Error retrieving user tickets:', error);
-//         res.status(500).json({ error: `Internal server error: ${error.message}` });
-//     }
-// };
-
 import redisClient from '../config/redisClient.js';
+import User from '../models/userModel.js';
 import { v4 as uuidv4 } from 'uuid';
 
-const TICKET_EXPIRY_SECONDS = 2 * 60; // 70 minutes in seconds
-const taxCodeRegex = /^[a-zA-Z0-9]{14}$/;
+const TICKET_EXPIRY_SECONDS = 70 * 60; // 70 minutes in seconds
+const REDIS_KEYS = {
+    ticket: (ticketId) => `ticket:${ticketId}`,
+    userActiveTickets: (taxCode) => `user:${taxCode}:active_tickets`,
+    userCache: (taxCode) => `user:${taxCode}`
+};
 
 export const createTicket = async (req, res) => {
-    const { name, taxCode, routeId, tripId } = req.body;
-  
+    const { taxCode, routeId, tripId } = req.body;
+
     try {
-        if (!taxCodeRegex.test(taxCode)) {
-            return res.status(400).json({ error: 'Invalid tax code format.' });
+        const user = await User.findOne({ taxCode });
+        if (!user) {
+            return res.status(404).json({ error: 'User not found. Please register first.' });
         }
-  
-        // Get or create user (permanent storage)
-        let user = await redisClient.hGetAll(`user:${taxCode}`);
-  
-        if (Object.keys(user).length === 0) {
-            user = {
-                name,
-                taxCode,
-                createdAt: new Date().toISOString(),
-                totalTickets: '0'
-            };
-            await redisClient.hSet(`user:${taxCode}`, user);
-        }
-  
+
         const ticketId = uuidv4();
-        const expirationTime = new Date(Date.now() + TICKET_EXPIRY_SECONDS * 1000);
+        const now = new Date();
+        const expirationTime = new Date(now.getTime() + TICKET_EXPIRY_SECONDS * 1000);
         
         const ticket = {
             ticketId,
             userId: taxCode,
             routeId,
             tripId,
+            userName: user.name,
             status: 'active',
-            createdAt: new Date().toISOString(),
+            createdAt: now.toISOString(),
             expired_at: expirationTime.toISOString()
         };
 
+        // Use Redis multi for atomic operations
+        const multi = redisClient.multi();
+        
         // Store ticket with TTL
-        await redisClient.hSet(`ticket:${ticketId}`, ticket);
-        await redisClient.expire(`ticket:${ticketId}`, TICKET_EXPIRY_SECONDS);
+        multi.hSet(REDIS_KEYS.ticket(ticketId), ticket);
+        multi.expire(REDIS_KEYS.ticket(ticketId), TICKET_EXPIRY_SECONDS);
+        
+        // Add to user's active tickets set with same TTL
+        multi.sAdd(REDIS_KEYS.userActiveTickets(taxCode), ticketId);
+        multi.expire(REDIS_KEYS.userActiveTickets(taxCode), TICKET_EXPIRY_SECONDS);
+        
+        await multi.exec();
 
-        // Add to user's active tickets set
-        await redisClient.sAdd(`user:${taxCode}:active_tickets`, ticketId);
-        await redisClient.expire(`user:${taxCode}:active_tickets`, TICKET_EXPIRY_SECONDS);
+        // Update MongoDB ticket count
+        await User.updateOne(
+            { taxCode },
+            { 
+                $inc: { totalTickets: 1 },
+                $set: { lastTicketAt: now }
+            }
+        );
 
-        // Increment total tickets count (permanent)
-        await redisClient.hIncrBy(`user:${taxCode}`, 'totalTickets', 1);
+        // Update Redis cache if it exists
+        const cachedUser = await redisClient.hGetAll(REDIS_KEYS.userCache(taxCode));
+        if (Object.keys(cachedUser).length > 0) {
+            await redisClient.hIncrBy(REDIS_KEYS.userCache(taxCode), 'totalTickets', 1);
+        }
 
-        console.log('Ticket stored successfully:', ticket);
-  
         res.status(201).json({ 
             message: 'Ticket created successfully', 
             ticket,
@@ -206,56 +68,53 @@ export const createTicket = async (req, res) => {
         });
     } catch (error) {
         console.error('Error creating ticket:', error);
-        res.status(500).json({ error: `Internal server error: ${error.message}` });
+        res.status(500).json({ error: 'Failed to create ticket' });
     }
 };
 
 export const getUserTickets = async (req, res) => {
-  const { taxCode } = req.params;
+    const { taxCode } = req.params;
+    
+    try {
+        // Check if user exists in MongoDB
+        const user = await User.findOne({ taxCode });
+        if (!user) {
+            return res.status(404).json({ error: 'User not found' });
+        }
 
-  try {
-      // Get user data
-      const user = await redisClient.hGetAll(`user:${taxCode}`);
-      if (Object.keys(user).length === 0) {
-          return res.status(404).json({ error: 'User not found' });
-      }
+        // Get active ticket IDs from Redis
+        // Redis will automatically remove expired sets, so we only get valid tickets
+        const activeTicketIds = await redisClient.sMembers(REDIS_KEYS.userActiveTickets(taxCode));
 
-      // Get active ticket IDs
-      const activeTicketIds = await redisClient.sMembers(`user:${taxCode}:active_tickets`);
-      const totalTickets = parseInt(user.totalTickets || '0');
-
-      // Return only active ticket count and IDs
-      res.status(200).json({
-          activeTicketCount: activeTicketIds.length,
-          activeTicketIds: activeTicketIds,
-          totalPurchased: totalTickets
-      });
-
-  } catch (error) {
-      console.error('Error retrieving user tickets:', error);
-      res.status(500).json({ error: `Internal server error: ${error.message}` });
-  }
+        res.status(200).json({
+            activeTicketCount: activeTicketIds.length,
+            totalPurchased: user.totalTickets || 0,
+            activeTicketIds: activeTicketIds
+        });
+    } catch (error) {
+        console.error('Error retrieving user tickets:', error);
+        res.status(500).json({ error: 'Failed to retrieve tickets' });
+    }
 };
 
 export const getTicket = async (req, res) => {
     const { ticketId } = req.params;
-
+    
     try {
-        const ticket = await redisClient.hGetAll(`ticket:${ticketId}`);
+        const ticket = await redisClient.hGetAll(REDIS_KEYS.ticket(ticketId));
         
         if (Object.keys(ticket).length === 0) {
             return res.status(404).json({ error: 'Ticket not found or expired' });
         }
 
-        const ttl = await redisClient.ttl(`ticket:${ticketId}`);
+        const ttl = await redisClient.ttl(REDIS_KEYS.ticket(ticketId));
         
         res.status(200).json({
             ...ticket,
-            timeRemaining: ttl > 0 ? `${ttl} seconds` : 'expired'
+            timeRemaining: `${ttl} seconds`
         });
     } catch (error) {
         console.error('Error retrieving ticket:', error);
-        res.status(500).json({ error: `Internal server error: ${error.message}` });
+        res.status(500).json({ error: 'Failed to retrieve ticket' });
     }
 };
-

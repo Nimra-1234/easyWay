@@ -1,56 +1,62 @@
-// import client from '../config/redisClient.js';
-
-// export const getAllTrips = async (req, res) => {
-//   const keys = await client.keys('trip:*');
-//   const routes = await Promise.all(keys.map(key => client.hGetAll(key)));
-//   res.json(routes);
-// };
-
-// export const getTripById = async (req, res) => {
-//   const route = await client.hGetAll(`trip:${req.params.id}`);
-//   res.json(route);
-// };
-
 import mongoose from 'mongoose';
-import Trip from '../models/tripModel.js'; //Assuming a Trip model is defined in this path
+import Trip from '../models/tripModel.js';
 
 export const getAllTrips = async (req, res) => {
-  try {
-    const trips = await Trip.find().limit(1000); // Fetch all trips from the MongoDb Collection
-    res.json({
-      success: true,
-      data: trips
-    });
-  } catch (error) {
-    console.error("Error fetching all trips:", error);
-    res.status(500).json({
-      success: false,
-      error: error.message
-    });
-  }
+    try {
+        // Simple find operation to get all trips
+        const trips = await Trip.find(
+            {}, 
+            { 
+                _id: 0,
+                trip_id: 1,
+                service_id: 1,
+                trip_headsign: 1,
+                direction_id: 1
+            }
+        ).limit(1000);  // Keep a reasonable limit
+
+        res.json({
+            success: true,
+            data: trips
+        });
+
+    } catch (error) {
+        console.error("Error fetching trips:", error);
+        res.status(500).json({
+            success: false,
+            message: "Error fetching trips",
+            error: error.message
+        });
+    }
 };
 
 export const getTripById = async (req, res) => {
-  try {
-    const tripId = req.params.id;
-    const trip = await Trip.findOne({ trip_id: tripId }); // Assuming route_id is the field name
+    try {
+        const { id: tripId } = req.params;
 
-    if (!trip) {
-      return res.status(404).json({
-        success: false,
-        message: "Trip not found"
-      });
+        const trip = await Trip.findOne(
+            { trip_id: tripId },
+            { _id: 0 }  // Exclude _id field
+        );
+
+        if (!trip) {
+            return res.status(404).json({
+                success: false,
+                message: `Trip with ID ${tripId} not found`
+            });
+        }
+
+        res.json({
+            success: true,
+            data: trip
+        });
+
+    } catch (error) {
+        console.error("Error fetching trip:", error);
+        res.status(500).json({
+            success: false,
+            message: "Error fetching trip",
+            error: error.message
+        });
     }
-
-    res.json({
-      success: true,
-      data: trip
-    });
-  } catch (error) {
-    console.error("Error fetching Trip by ID:", error);
-    res.status(500).json({
-      success: false,
-      error: error.message
-    });
-  }
 };

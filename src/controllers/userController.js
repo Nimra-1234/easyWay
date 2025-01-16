@@ -1,153 +1,255 @@
-import redisClient from '../config/redisClient.js';  // Redis client import
+import mongoose from 'mongoose';
+import redisClient from '../config/redisClient.js';
+import User from '../models/userModel.js';
 
 // Regular expressions for validation
 const taxCodeRegex = /^[a-zA-Z0-9]{14}$/;
 const emailRegex = /^\S+@\S+\.\S+$/;
 
-// Create or update a user in Redis
+const CACHE_DURATION = 24 * 60 * 60; // 24 hours in seconds
+const REDIS_KEYS = {
+  user: (taxCode) => `user:${taxCode}`,
+  email: (email) => `email:${email}`
+};
+
+// Helper function to cache user data
+const cacheUserData = async (userData) => {
+  const multi = redisClient.multi();
+  
+  // Cache user data with TTL
+  multi.hSet(REDIS_KEYS.user(userData.taxCode), {
+    name: userData.name,
+    taxCode: userData.taxCode,
+    contact: userData.contact,
+    createdAt: userData.createdAt.toISOString(),
+    updatedAt: userData.updatedAt ? userData.updatedAt.toISOString() : '0'
+  });
+  multi.expire(REDIS_KEYS.user(userData.taxCode), CACHE_DURATION);
+  
+  // Cache email lookup with TTL
+  multi.set(REDIS_KEYS.email(userData.contact), userData.taxCode);
+  multi.expire(REDIS_KEYS.email(userData.contact), CACHE_DURATION);
+  
+  await multi.exec();
+};
+
 export const createUser = async (req, res) => {
+  console.log('Received request body:', req.body);
   const { name, taxCode, contact } = req.body;
 
-  console.log('Received data:', req.body); // Log incoming data
-
   try {
-    if (!name || !taxCode || !contact || !taxCodeRegex.test(taxCode) || !emailRegex.test(contact)) {
-      return res.status(400).json({ error: 'Missing or invalid fields' });
+    // Validation
+    if (!name || !taxCode || !contact) {
+      return res.status(400).json({ error: 'Missing required fields' });
     }
 
-    const existingUser = await redisClient.hGetAll(`user:${taxCode}`);
-    if (Object.keys(existingUser).length !== 0) {
-      return res.status(400).json({ error: 'User with this tax code already exists.' });
+    if (!taxCodeRegex.test(taxCode)) {
+      return res.status(400).json({ error: 'Invalid tax code format' });
     }
 
-    const emailKey = `email:${contact}`;
-    const existingEmail = await redisClient.get(emailKey);
-    if (existingEmail) {
-      return res.status(400).json({ error: 'Email already associated with another user.' });
+    if (!emailRegex.test(contact)) {
+      return res.status(400).json({ error: 'Invalid email format' });
     }
 
-    const userData = { 
-      name, 
-      taxCode, 
-      contact, 
-      createdAt: new Date().toISOString(),
-      updatedAt: '0'  // Set updatedAt to 0 initially
-    };
+    // Check if user exists in MongoDB
+    const existingUser = await User.findOne({ $or: [{ taxCode }, { contact }] });
+    if (existingUser) {
+      return res.status(400).json({ 
+        error: existingUser.taxCode === taxCode ? 
+          'Tax code already exists' : 
+          'Email already exists' 
+      });
+    }
 
-    console.log('User data to be stored:', userData); // Log user data
+    // Create new user in MongoDB
+    const user = new User({
+      name,
+      taxCode,
+      contact,
+      createdAt: new Date(),
+      totalTickets: 0
+    });
 
-    await redisClient.hSet(`user:${taxCode}`, userData);
-    await redisClient.set(emailKey, taxCode); // Link email to taxCode for quick lookup
+    await user.save();
+    console.log('User saved to MongoDB:', user);
 
-    res.status(201).json({ message: 'User created successfully' });
+    // Cache in Redis
+    try {
+      await redisClient.hSet(`user:${taxCode}`, {
+        name,
+        taxCode,
+        contact,
+        createdAt: new Date().toISOString(),
+        totalTickets: '0'
+      });
+      await redisClient.expire(`user:${taxCode}`, CACHE_DURATION);
+      
+      // Cache email lookup
+      await redisClient.set(`email:${contact}`, taxCode);
+      await redisClient.expire(`email:${contact}`, CACHE_DURATION);
+    } catch (redisError) {
+      console.error('Redis caching error:', redisError);
+      // Continue even if Redis caching fails
+    }
+
+    res.status(201).json({ 
+      message: 'User created successfully',
+      user: {
+        name,
+        taxCode,
+        contact,
+        createdAt: user.createdAt,
+        totalTickets: 0
+      }
+    });
+
   } catch (error) {
-    console.error('Error creating user:', error); // Log the error
-    res.status(500).json({ error: `Internal server error: ${error.message}` });
+    console.error('Error creating user:', error);
+    res.status(500).json({ 
+      error: 'Internal server error',
+      details: error.message 
+    });
   }
 };
 
 
-// Update user details
 export const updateUser = async (req, res) => {
   const { taxCode } = req.params;
   const { name, contact } = req.body;
 
   try {
-    // Fetch the existing user from Redis
-    const existingUser = await redisClient.hGetAll(`user:${taxCode}`);
-    if (Object.keys(existingUser).length === 0) {
+    // Find and update user in MongoDB
+    const user = await User.findOne({ taxCode });
+    if (!user) {
       return res.status(404).json({ error: 'User not found' });
     }
 
-    // Create an update object with only the provided fields
-    const updates = {
-      updatedAt: new Date().toISOString()
-    };
-
-    // Track what was actually updated
+    const updates = {};
     const updateMessages = [];
 
-    // Add name to updates if provided and different from existing
-    if (name !== undefined && name !== existingUser.name) {
+    if (name && name !== user.name) {
       updates.name = name;
-      updateMessages.push(`Name updated from "${existingUser.name}" to "${name}"`);
+      updateMessages.push(`Name updated from "${user.name}" to "${name}"`);
     }
 
-    // Add contact to updates if provided and valid
-    if (contact !== undefined) {
-      if (!emailRegex.test(contact)) {
-        return res.status(400).json({ error: 'Invalid contact format. Must be a valid email address.' });
+    if (contact && contact !== user.contact) {
+      if (await User.findOne({ contact })) {
+        return res.status(400).json({ 
+          error: 'Email already associated with another user.' 
+        });
       }
-      if (contact !== existingUser.contact) {
-        updates.contact = contact;
-        updateMessages.push(`Contact updated from "${existingUser.contact || 'not set'}" to "${contact}"`);
-      }
+      updates.contact = contact;
+      updateMessages.push(`Contact updated from "${user.contact}" to "${contact}"`);
     }
 
-    // If no fields to update were provided or no changes needed
-    if (updateMessages.length === 0) {
-      return res.status(400).json({ 
+    if (Object.keys(updates).length === 0) {
+      return res.status(400).json({
         message: 'No changes required',
         note: 'The provided values are the same as the existing values'
       });
     }
 
-    // Update the user data in Redis
-    await redisClient.hSet(`user:${taxCode}`, updates);
+    updates.updatedAt = new Date();
+
+    // Update MongoDB
+    const updatedUser = await User.findOneAndUpdate(
+      { taxCode },
+      updates,
+      { new: true }
+    );
+
+    // Update Redis cache
+    await cacheUserData(updatedUser);
+
+    // If email was updated, remove old email lookup
+    if (updates.contact) {
+      await redisClient.del(REDIS_KEYS.email(user.contact));
+    }
 
     res.status(200).json({
       message: 'User details updated successfully',
       updates: updateMessages,
       updatedFields: Object.keys(updates).filter(key => key !== 'updatedAt')
     });
+
   } catch (error) {
     console.error('Error updating user:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 };
 
-// Get user details by taxCode
 export const getUser = async (req, res) => {
   const { taxCode } = req.params;
 
   try {
-    // Fetch user details from Redis using taxCode
-    const user = await redisClient.hGetAll(`user:${taxCode}`);
-    if (Object.keys(user).length === 0) {
+    // Try Redis cache first
+    const cachedUser = await redisClient.hGetAll(REDIS_KEYS.user(taxCode));
+
+    if (Object.keys(cachedUser).length > 0) {
+      return res.status(200).json(cachedUser);
+    }
+
+    // If not in cache, get from MongoDB
+    const user = await User.findOne({ taxCode });
+    if (!user) {
       return res.status(404).json({ error: 'User not found' });
     }
 
-    res.status(200).json(user);  // Respond with the user's details
+    // Cache the user data
+    await cacheUserData(user);
+
+    res.status(200).json(user);
+
   } catch (error) {
+    console.error('Error retrieving user:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 };
 
-// Delete user
 export const deleteUser = async (req, res) => {
   const { taxCode } = req.params;
 
-  // Validate the taxCode format (14 digits, alphanumeric)
-  const taxCodeRegex = /^[a-zA-Z0-9]{14}$/;
-
-  if (!taxCodeRegex.test(taxCode)) {
-    return res.status(400).json({
-      error: 'Invalid tax code format. Tax code must be exactly 14 characters (letters and numbers only).'
-    });
-  }
-
   try {
-    const user = await redisClient.hGetAll(`user:${taxCode}`);
-    if (Object.keys(user).length === 0) {
+    const user = await User.findOne({ taxCode });
+    if (!user) {
       return res.status(404).json({ error: 'User not found' });
     }
 
-    // Delete user from Redis
-    await redisClient.del(`user:${taxCode}`);
+    // Delete from MongoDB
+    await User.deleteOne({ taxCode });
+
+    // Delete from Redis cache
+    await redisClient.del(REDIS_KEYS.user(taxCode));
+    await redisClient.del(REDIS_KEYS.email(user.contact));
 
     res.status(200).json({ message: 'User deleted successfully' });
+
   } catch (error) {
     console.error('Error deleting user:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 };
+
+// Optional: Background job to clean up old cache entries
+const cleanupOldCache = async () => {
+  try {
+    const userKeys = await redisClient.keys('user:*');
+    const emailKeys = await redisClient.keys('email:*');
+    
+    for (const key of [...userKeys, ...emailKeys]) {
+      const ttl = await redisClient.ttl(key);
+      if (ttl <= 0) {
+        await redisClient.del(key);
+      }
+    }
+  } catch (error) {
+    console.error('Cache cleanup error:', error);
+  }
+};
+
+// Run cleanup every hour
+setInterval(cleanupOldCache, 60 * 60 * 1000);
+
+
+
+

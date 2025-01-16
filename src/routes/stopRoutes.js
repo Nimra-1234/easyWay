@@ -1,5 +1,5 @@
 import express from 'express';
-import { getAllStops, getStopById, updateStopName, deleteStopById } from '../controllers/stopController.js';
+import { getAllStops, getStopById, updateStopName} from '../controllers/stopController.js';
 
 const router = express.Router();
 
@@ -167,62 +167,5 @@ router.get('/:id', getStopById);
  */
 
 router.put('/update-stop', updateStopName);
-
-/**
- * @swagger
- * /api/stops/delete-stop/{stop_id}:
- *   delete:
- *     summary: Delete a specific stop
- *     description: Deletes a stop by its unique stop_id.
- *     tags: [Stops]
- *     parameters:
- *       - in: path
- *         name: stop_id
- *         required: true
- *         description: Unique identifier of the stop to delete.
- *         schema:
- *           type: string
- *     responses:
- *       200:
- *         description: Stop deleted successfully
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                   example: true
- *                 message:
- *                   type: string
- *                   example: "Stop with ID 05000 has been deleted"
- *       404:
- *         description: Stop not found
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                   example: false
- *                 message:
- *                   type: string
- *                   example: "Stop not found"
- *       500:
- *         description: Internal server error
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                   example: false
- *                 error:
- *                   type: string
- *                   example: "Error deleting stop"
- */
-router.delete('/delete-stop/:stop_id', deleteStopById);
 
 export default router;
