@@ -1,4 +1,3 @@
-// src/utils/importGTFSData.js
 import admZip from 'adm-zip';
 import csv from 'csv-parser';
 import fs from 'fs';
@@ -8,8 +7,9 @@ import { fileURLToPath } from 'url';
 import { dirname } from 'path';
 import Route from '../models/routeModel.js';
 import Trip from '../models/tripModel.js';
+import Stop from '../models/stopModel.js'; 
 
-// Helper function for memory usage logging
+// Keep all helper functions the same...
 const logMemoryUsage = () => {
     const used = process.memoryUsage();
     console.log('Memory usage:');
@@ -18,13 +18,11 @@ const logMemoryUsage = () => {
     }
 };
 
-// Helper function for time tracking
 const getElapsedTime = (startTime) => {
     const elapsed = Date.now() - startTime;
     return (elapsed / 1000).toFixed(2);
 };
 
-// Parse CSV helper function
 const parseCSVFile = async (filePath) => {
     const parseStartTime = Date.now();
     console.log(`\n📖 Parsing: ${path.basename(filePath)}`);
@@ -59,7 +57,7 @@ const importGTFSData = async ({ gtfsPath, batchSize = 1000, mongoUrl }) => {
     try {
         console.log('\n=== Starting GTFS Import Process ===');
         console.log(`Start time: ${new Date().toISOString()}`);
-
+        
         // Connect to MongoDB
         console.log('\n📡 Connecting to MongoDB...');
         await mongoose.connect(mongoUrl, {
@@ -71,7 +69,8 @@ const importGTFSData = async ({ gtfsPath, batchSize = 1000, mongoUrl }) => {
         console.log('\n🗑️  Clearing existing data...');
         await Promise.all([
             Route.deleteMany({}),
-            Trip.deleteMany({})
+            Trip.deleteMany({}),
+            Stop.deleteMany({})
         ]);
         console.log('✅ Cleared existing data');
 
@@ -81,19 +80,91 @@ const importGTFSData = async ({ gtfsPath, batchSize = 1000, mongoUrl }) => {
         const routes = await parseCSVFile(path.join(gtfsPath, 'routes.txt'));
         const trips = await parseCSVFile(path.join(gtfsPath, 'trips.txt'));
 
-        // Create lookup maps
-        console.log('\n🗺️  Creating lookup maps...');
-        const stopsMap = new Map(stops.map(stop => [stop.stop_id, {
+        // Create stops lookup map for basic info
+        const stopsBasicInfo = new Map(stops.map(stop => [
+            stop.stop_id,
+            {
+                stop_id: stop.stop_id,
+                stop_name: stop.stop_name
+            }
+        ]));
+
+        // Import stops collection (unchanged)
+        console.log('\n🚏 Processing and importing stops...');
+        const stopDocs = stops.map(stop => ({
             stop_id: stop.stop_id,
             stop_name: stop.stop_name,
             stop_lat: parseFloat(stop.stop_lat),
             stop_lon: parseFloat(stop.stop_lon),
             location_type: parseInt(stop.location_type) || 0,
-            wheelchair_boarding: parseInt(stop.wheelchair_boarding) || 0,
-            zone_id: stop.zone_id
-        }]));
+            stop_times: []
+        }));
 
-        // Import routes
+        for (let i = 0; i < stopDocs.length; i += batchSize) {
+            const batch = stopDocs.slice(i, i + batchSize);
+            try {
+                await Stop.insertMany(batch, { ordered: false });
+                console.log(`✅ Imported stops ${i + 1} to ${i + batch.length} of ${stopDocs.length}`);
+            } catch (error) {
+                console.error(`❌ Error importing stops batch:`, error.message);
+            }
+        }
+
+        // Process stop_times
+        console.log('\n⏳ Processing stop_times...');
+        const stopTimesForStops = new Map();
+        const stopTimesForTrips = new Map();
+        let stopTimesProcessed = 0;
+
+        await new Promise((resolve, reject) => {
+            fs.createReadStream(path.join(gtfsPath, 'stop_times.txt'))
+                .pipe(csv())
+                .on('data', (data) => {
+                    stopTimesProcessed++;
+                    if (stopTimesProcessed % 100000 === 0) {
+                        console.log(`   Processed ${stopTimesProcessed.toLocaleString()} stop_times`);
+                    }
+
+                    // For stops collection
+                    if (!stopTimesForStops.has(data.stop_id)) {
+                        stopTimesForStops.set(data.stop_id, []);
+                    }
+                    stopTimesForStops.get(data.stop_id).push({
+                        arrival_time: data.arrival_time,
+                        departure_time: data.departure_time,
+                        pickup_type: parseInt(data.pickup_type) || 0,
+                        drop_off_type: parseInt(data.drop_off_type) || 0
+                    });
+
+                    // For trips collection (modified for new structure)
+                    if (!stopTimesForTrips.has(data.trip_id)) {
+                        stopTimesForTrips.set(data.trip_id, []);
+                    }
+                    stopTimesForTrips.get(data.trip_id).push({
+                        stop_id: data.stop_id,
+                        arrival_time: data.arrival_time,
+                        departure_time: data.departure_time,
+                        sequence: parseInt(data.stop_sequence)
+                    });
+                })
+                .on('end', resolve)
+                .on('error', reject);
+        });
+
+        // Update stops with their stop times
+        console.log('\n📝 Updating stops with stop times...');
+        for (const [stopId, stopTimes] of stopTimesForStops) {
+            try {
+                await Stop.updateOne(
+                    { stop_id: stopId },
+                    { $set: { stop_times: stopTimes } }
+                );
+            } catch (error) {
+                console.error(`❌ Error updating stop times for stop ${stopId}:`, error.message);
+            }
+        }
+
+        // Import routes (unchanged)
         console.log('\n🚌 Processing and importing routes...');
         const routeDocs = routes.map(route => ({
             route_id: route.route_id,
@@ -115,66 +186,40 @@ const importGTFSData = async ({ gtfsPath, batchSize = 1000, mongoUrl }) => {
         }));
 
         // Import routes in batches
-        console.log('\n📥 Importing routes in batches...');
         for (let i = 0; i < routeDocs.length; i += batchSize) {
             const batch = routeDocs.slice(i, i + batchSize);
             try {
                 await Route.insertMany(batch, { ordered: false });
                 console.log(`✅ Imported routes ${i + 1} to ${i + batch.length} of ${routeDocs.length}`);
-                if ((i + batch.length) % 1000 === 0) {
-                    logMemoryUsage();
-                }
             } catch (error) {
-                console.error(`❌ Error in batch ${i + 1} to ${i + batch.length}:`, error.message);
+                console.error(`❌ Error importing routes batch:`, error.message);
             }
         }
 
-        // Process stop_times
-        console.log('\n⏳ Processing stop_times...');
-        const stopTimesByTrip = new Map();
-        let stopTimesProcessed = 0;
-
-        await new Promise((resolve, reject) => {
-            fs.createReadStream(path.join(gtfsPath, 'stop_times.txt'))
-                .pipe(csv())
-                .on('data', (data) => {
-                    stopTimesProcessed++;
-                    if (stopTimesProcessed % 100000 === 0) {
-                        console.log(`   Processed ${stopTimesProcessed.toLocaleString()} stop_times`);
-                    }
-
-                    if (!stopTimesByTrip.has(data.trip_id)) {
-                        stopTimesByTrip.set(data.trip_id, []);
-                    }
-
-                    const stopInfo = stopsMap.get(data.stop_id);
-                    if (stopInfo) {
-                        stopTimesByTrip.get(data.trip_id).push({
-                            ...stopInfo,
-                            stop_times: [{
-                                arrival_time: data.arrival_time,
-                                departure_time: data.departure_time,
-                                stop_sequence: parseInt(data.stop_sequence),
-                                pickup_type: parseInt(data.pickup_type) || 0,
-                                drop_off_type: parseInt(data.drop_off_type) || 0
-                            }]
-                        });
-                    }
-                })
-                .on('end', resolve)
-                .on('error', reject);
-        });
-
-        // Import trips
+        // Import trips with improved structure
         console.log('\n🚂 Processing and importing trips...');
-        const tripDocs = trips.map(trip => ({
-            trip_id: trip.trip_id,
-            service_id: trip.service_id,
-            trip_headsign: trip.trip_headsign,
-            direction_id: parseInt(trip.direction_id) || 0,
-            stops: (stopTimesByTrip.get(trip.trip_id) || [])
-                .sort((a, b) => a.stop_times[0].stop_sequence - b.stop_times[0].stop_sequence)
-        }));
+        const tripDocs = trips.map(trip => {
+            const tripStopTimes = stopTimesForTrips.get(trip.trip_id) || [];
+            return {
+                trip_id: trip.trip_id,
+                route_id: trip.route_id,
+                service_id: trip.service_id,
+                trip_headsign: trip.trip_headsign,
+                direction_id: parseInt(trip.direction_id) || 0,
+                itinerary: tripStopTimes
+                    .sort((a, b) => a.sequence - b.sequence)
+                    .map(stopTime => {
+                        const stopInfo = stopsBasicInfo.get(stopTime.stop_id);
+                        return {
+                            stop_id: stopInfo.stop_id,
+                            stop_name: stopInfo.stop_name,
+                            arrival_time: stopTime.arrival_time,
+                            departure_time: stopTime.departure_time,
+                            sequence: stopTime.sequence
+                        };
+                    })
+            };
+        });
 
         // Import trips in batches
         let tripsProcessed = 0;
@@ -184,9 +229,6 @@ const importGTFSData = async ({ gtfsPath, batchSize = 1000, mongoUrl }) => {
                 await Trip.insertMany(batch, { ordered: false });
                 tripsProcessed += batch.length;
                 console.log(`✅ Imported trips ${i + 1} to ${i + batch.length} of ${tripDocs.length}`);
-                if (tripsProcessed % 1000 === 0) {
-                    logMemoryUsage();
-                }
             } catch (error) {
                 console.error(`❌ Error importing trips batch:`, error.message);
             }
@@ -194,15 +236,16 @@ const importGTFSData = async ({ gtfsPath, batchSize = 1000, mongoUrl }) => {
 
         const finalCounts = await Promise.all([
             Route.countDocuments(),
-            Trip.countDocuments()
+            Trip.countDocuments(),
+            Stop.countDocuments()
         ]);
 
         console.log('\n=== Import Summary ===');
         console.log(`✅ Routes imported: ${finalCounts[0]}`);
         console.log(`✅ Trips imported: ${finalCounts[1]}`);
+        console.log(`✅ Stops imported: ${finalCounts[2]}`);
         console.log(`⏱️  Total time: ${getElapsedTime(startTime)}s`);
         logMemoryUsage();
-
     } catch (error) {
         console.error('\n❌ Import failed:', error);
         throw error;
@@ -212,14 +255,73 @@ const importGTFSData = async ({ gtfsPath, batchSize = 1000, mongoUrl }) => {
     }
 };
 
-// Main function to run the import
 const main = async () => {
     try {
+        console.log('Starting GTFS import process...');
+        
         const __filename = fileURLToPath(import.meta.url);
         const __dirname = dirname(__filename);
-        const projectRoot = path.resolve(__dirname, '../..');
-        const gtfsPath = path.join(projectRoot, 'dataset', 'rome_dataset');
+        
+        // Path to project root and files
+        const projectRoot = path.join(__dirname, '..', '..');
+        const zipFilePath = path.join(projectRoot, 'rome_dataset.zip');
+        console.log('Looking for zip file at:', zipFilePath);
 
+        // Check if zip file exists
+        if (!fs.existsSync(zipFilePath)) {
+            console.error(`Zip file not found: ${zipFilePath}`);
+            console.log('Please ensure the GTFS zip file is in the correct location.');
+            process.exit(1);
+        }
+        console.log('✅ Found zip file');
+
+        const extractBasePath = path.join(projectRoot, 'dataset');
+        console.log('Base extraction path:', extractBasePath);
+
+        // Create extraction directory if it doesn't exist
+        if (!fs.existsSync(extractBasePath)) {
+            console.log('Creating extraction directory...');
+            fs.mkdirSync(extractBasePath, { recursive: true });
+        }
+
+        // Extract the zip file
+        console.log('\n📦 Extracting GTFS zip file...');
+        try {
+            const zip = new admZip(zipFilePath);
+            zip.extractAllTo(extractBasePath, true);
+            console.log('✅ Extraction complete');
+        } catch (error) {
+            console.error('Error extracting zip file:', error);
+            process.exit(1);
+        }
+
+        // Find the actual path where files are extracted
+        let gtfsPath = path.join(extractBasePath, 'rome_dataset');
+        console.log('Checking path:', gtfsPath);
+        
+        // If files are nested one level deeper, update the path
+        if (fs.existsSync(path.join(gtfsPath, 'rome_dataset'))) {
+            gtfsPath = path.join(gtfsPath, 'rome_dataset');
+            console.log('Found nested directory, updated path to:', gtfsPath);
+        }
+
+        // List extracted files
+        console.log('\nExtracted files in', gtfsPath, ':');
+        const files = fs.readdirSync(gtfsPath);
+        files.forEach(file => console.log(`- ${file}`));
+
+        // Verify required files exist in extracted directory
+        const requiredFiles = ['stops.txt', 'routes.txt', 'trips.txt', 'stop_times.txt'];
+        const missingFiles = requiredFiles.filter(file => !fs.existsSync(path.join(gtfsPath, file)));
+        
+        if (missingFiles.length > 0) {
+            console.error('Missing required GTFS files:', missingFiles);
+            console.log('The zip file might be corrupted or missing required files.');
+            process.exit(1);
+        }
+        console.log('✅ All required files present');
+
+        console.log('\nStarting data import...');
         await importGTFSData({
             gtfsPath,
             batchSize: 1000,
@@ -227,17 +329,21 @@ const main = async () => {
         });
 
     } catch (error) {
-        console.error('Fatal error:', error);
+        console.error('Fatal error:', error.message);
+        console.error(error.stack);
         process.exit(1);
     }
 };
 
-// Run the script if called directly
+// Make sure we're actually executing the main function
+console.log('Script started');
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
+    console.log('Running main function...');
     main().catch(error => {
-        console.error('Fatal error:', error);
+        console.error('Unhandled error in main:', error);
         process.exit(1);
     });
+} else {
+    console.log('Script imported but not directly run');
 }
-
 export default importGTFSData;

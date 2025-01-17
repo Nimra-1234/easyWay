@@ -1,17 +1,21 @@
-// src/models/stopModel.js
 import mongoose from 'mongoose';
-import stopTimeSchema from './stopTimeModel.js';
+
+const stopTimeSchema = new mongoose.Schema({
+    arrival_time: String,
+    departure_time: String,
+    pickup_type: Number,
+    drop_off_type: Number
+}, { _id: false });
 
 const stopSchema = new mongoose.Schema({
-    stop_id: { type: String, required: true },
+    stop_id: { type: String, required: true, unique: true },
     stop_name: String,
-    stop_desc: String,
     stop_lat: Number,
     stop_lon: Number,
     location_type: Number,
-    wheelchair_boarding: Number,
-    zone_id: String,
     stop_times: [stopTimeSchema]
-}, { _id: false });  // Added _id: false to prevent duplicate _id fields
+}, { _id: false });  // Added _id: false to prevent duplicate _id field);
 
-export default stopSchema;
+const Stop = mongoose.model('Stop', stopSchema);
+
+export default Stop;

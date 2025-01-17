@@ -1,332 +1,219 @@
 import mongoose from 'mongoose';
 import redisClient from '../config/redisClient.js';
 import User from '../models/userModel.js';
+import { monitorRedisMemory } from '../utils/redisMemoryMonitor.js';
 
-// Regular expressions for validation
 const taxCodeRegex = /^[a-zA-Z0-9]{14}$/;
 const emailRegex = /^\S+@\S+\.\S+$/;
+const MAX_USERS_IN_CACHE = 6;
 
-const CACHE_DURATION = 24 * 60 * 60; // 24 hours in seconds
 const REDIS_KEYS = {
-  user: (taxCode) => `user:${taxCode}`,
-  email: (email) => `email:${email}`
+    user: (taxCode) => `user:${taxCode}`,
+    email: (email) => `email:${email}`,
+    userList: 'cached_users_list'
 };
 
-// Helper function to cache user data
 const cacheUserData = async (userData) => {
-  const multi = redisClient.multi();
-  
-  // Cache user data with TTL
-  multi.hSet(REDIS_KEYS.user(userData.taxCode), {
-    name: userData.name,
-    taxCode: userData.taxCode,
-    contact: userData.contact,
-    createdAt: userData.createdAt.toISOString(),
-    updatedAt: userData.updatedAt ? userData.updatedAt.toISOString() : '0'
-  });
-  multi.expire(REDIS_KEYS.user(userData.taxCode), CACHE_DURATION);
-  
-  // Cache email lookup with TTL
-  multi.set(REDIS_KEYS.email(userData.contact), userData.taxCode);
-  multi.expire(REDIS_KEYS.email(userData.contact), CACHE_DURATION);
-  
-  await multi.exec();
+  try {
+      // Check if we need to clear cache
+      await monitorRedisMemory.checkAndMigrateUsers();
+
+      // If cache was cleared, this will be adding to an empty cache
+      const multi = redisClient.multi();
+      
+      // Cache user data
+      multi.hSet(`user:${userData.taxCode}`, {
+          name: userData.name,
+          taxCode: userData.taxCode,
+          contact: userData.contact,
+          createdAt: userData.createdAt.toISOString(),
+          totalTickets: userData.totalTickets?.toString() || '0'
+      });
+
+      // Cache email lookup
+      multi.set(`email:${userData.contact}`, userData.taxCode);
+      
+      // Add to tracking list
+      multi.rPush('cached_users_list', userData.taxCode);
+
+      await multi.exec();
+      return { success: true };
+  } catch (error) {
+      console.error('Redis caching error:', error);
+      return { success: false };
+  }
 };
 
 export const createUser = async (req, res) => {
-  console.log('Received request body:', req.body);
-  const { name, taxCode, contact } = req.body;
-
-  try {
-    // Validation
-    if (!name || !taxCode || !contact) {
-      return res.status(400).json({ error: 'Missing required fields' });
-    }
-
-    if (!taxCodeRegex.test(taxCode)) {
-      return res.status(400).json({ error: 'Invalid tax code format' });
-    }
-
-    if (!emailRegex.test(contact)) {
-      return res.status(400).json({ error: 'Invalid email format' });
-    }
-
-    // Check if user exists in MongoDB
-    const existingUser = await User.findOne({ $or: [{ taxCode }, { contact }] });
-    if (existingUser) {
-      return res.status(400).json({ 
-        error: existingUser.taxCode === taxCode ? 
-          'Tax code already exists' : 
-          'Email already exists' 
-      });
-    }
-
-    // Create new user in MongoDB
-    const user = new User({
-      name,
-      taxCode,
-      contact,
-      createdAt: new Date(),
-      totalTickets: 0
-    });
-
-    await user.save();
-    console.log('User saved to MongoDB:', user);
-
-    // Cache in Redis
+    const { name, taxCode, contact } = req.body;
     try {
-      await redisClient.hSet(`user:${taxCode}`, {
-        name,
-        taxCode,
-        contact,
-        createdAt: new Date().toISOString(),
-        totalTickets: '0'
-      });
-      await redisClient.expire(`user:${taxCode}`, CACHE_DURATION);
-      
-      // Cache email lookup
-      await redisClient.set(`email:${contact}`, taxCode);
-      await redisClient.expire(`email:${contact}`, CACHE_DURATION);
-    } catch (redisError) {
-      console.error('Redis caching error:', redisError);
-      // Continue even if Redis caching fails
+        // 1. Validate input
+        if (!name || !taxCode || !contact) {
+            return res.status(400).json({ error: 'Missing required fields' });
+        }
+
+        // 2. Check existing user
+        const existingUser = await User.findOne({ $or: [{ taxCode }, { contact }] });
+        if (existingUser) {
+            return res.status(400).json({ 
+                error: 'User already exists'
+            });
+        }
+
+        // 3. Create in MongoDB FIRST (Source of Truth)
+        const user = new User({
+            name,
+            taxCode,
+            contact,
+            createdAt: new Date(),
+            totalTickets: 0
+        });
+        await user.save();
+
+        // 4. Cache in Redis (Performance Layer)
+        await cacheUserData(user);
+
+        res.status(201).json({
+            success: true,
+            message: 'User created successfully',
+            user: {
+                name,
+                taxCode,
+                contact,
+                createdAt: user.createdAt,
+                totalTickets: 0
+            }
+        });
+    } catch (error) {
+        console.error('Error creating user:', error);
+        res.status(500).json({ error: 'Internal server error' });
     }
-
-    res.status(201).json({ 
-      message: 'User created successfully',
-      user: {
-        name,
-        taxCode,
-        contact,
-        createdAt: user.createdAt,
-        totalTickets: 0
-      }
-    });
-
-  } catch (error) {
-    console.error('Error creating user:', error);
-    res.status(500).json({ 
-      error: 'Internal server error',
-      details: error.message 
-    });
-  }
 };
 
-
 export const updateUser = async (req, res) => {
-  const { taxCode } = req.params;
-  const { name, contact } = req.body;
+    const { taxCode } = req.params;
+    const { name, contact } = req.body;
+    try {
+        // 1. Find existing user
+        const user = await User.findOne({ taxCode });
+        if (!user) {
+            return res.status(404).json({ error: 'User not found' });
+        }
 
-  try {
-    // Find and update user in MongoDB
-    const user = await User.findOne({ taxCode });
-    if (!user) {
-      return res.status(404).json({ error: 'User not found' });
-    }
+        // 2. Prepare updates
+        const updates = {};
+        if (name && name !== user.name) updates.name = name;
+        if (contact && contact !== user.contact) {
+            if (await User.findOne({ contact })) {
+                return res.status(400).json({ error: 'Email already exists' });
+            }
+            updates.contact = contact;
+        }
 
-    const updates = {};
-    const updateMessages = [];
+        if (Object.keys(updates).length === 0) {
+            return res.status(400).json({ error: 'No changes provided' });
+        }
 
-    if (name && name !== user.name) {
-      updates.name = name;
-      updateMessages.push(`Name updated from "${user.name}" to "${name}"`);
-    }
+        // 3. Update in MongoDB
+        const updatedUser = await User.findOneAndUpdate(
+            { taxCode },
+            updates,
+            { new: true }
+        );
 
-    if (contact && contact !== user.contact) {
-      if (await User.findOne({ contact })) {
-        return res.status(400).json({ 
-          error: 'Email already associated with another user.' 
+        // 4. Update Redis cache
+        if (updates.contact) {
+            // Remove old email lookup
+            await redisClient.del(REDIS_KEYS.email(user.contact));
+        }
+        
+        // Update cache with new data
+        await cacheUserData(updatedUser);
+
+        res.json({
+            success: true,
+            message: 'User updated successfully',
+            user: updatedUser
         });
-      }
-      updates.contact = contact;
-      updateMessages.push(`Contact updated from "${user.contact}" to "${contact}"`);
+    } catch (error) {
+        console.error('Error updating user:', error);
+        res.status(500).json({ error: 'Internal server error' });
     }
-
-    if (Object.keys(updates).length === 0) {
-      return res.status(400).json({
-        message: 'No changes required',
-        note: 'The provided values are the same as the existing values'
-      });
-    }
-
-    updates.updatedAt = new Date();
-
-    // Update MongoDB
-    const updatedUser = await User.findOneAndUpdate(
-      { taxCode },
-      updates,
-      { new: true }
-    );
-
-    // Update Redis cache
-    await cacheUserData(updatedUser);
-
-    // If email was updated, remove old email lookup
-    if (updates.contact) {
-      await redisClient.del(REDIS_KEYS.email(user.contact));
-    }
-
-    res.status(200).json({
-      message: 'User details updated successfully',
-      updates: updateMessages,
-      updatedFields: Object.keys(updates).filter(key => key !== 'updatedAt')
-    });
-
-  } catch (error) {
-    console.error('Error updating user:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
 };
 
 export const getUser = async (req, res) => {
-  const { taxCode } = req.params;
+    const { taxCode } = req.params;
+    try {
+        const cachedUser = await redisClient.hGetAll(REDIS_KEYS.user(taxCode));
+        if (Object.keys(cachedUser).length > 0) {
+            return res.json({ success: true, user: cachedUser });
+        }
 
-  try {
-    // Try Redis cache first
-    const cachedUser = await redisClient.hGetAll(REDIS_KEYS.user(taxCode));
+        const user = await User.findOne({ taxCode });
+        if (!user) {
+            return res.status(404).json({ error: 'User not found' });
+        }
 
-    if (Object.keys(cachedUser).length > 0) {
-      return res.status(200).json(cachedUser);
+        await cacheUserData(user);
+        res.json({ success: true, user });
+    } catch (error) {
+        console.error('Error retrieving user:', error);
+        res.status(500).json({ error: 'Internal server error' });
     }
-
-    // If not in cache, get from MongoDB
-    const user = await User.findOne({ taxCode });
-    if (!user) {
-      return res.status(404).json({ error: 'User not found' });
-    }
-
-    // Cache the user data
-    await cacheUserData(user);
-
-    res.status(200).json(user);
-
-  } catch (error) {
-    console.error('Error retrieving user:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
 };
 
 export const deleteUser = async (req, res) => {
-  const { taxCode } = req.params;
+    const { taxCode } = req.params;
+    try {
+        const user = await User.findOne({ taxCode });
+        if (!user) {
+            return res.status(404).json({ error: 'User not found' });
+        }
 
-  try {
-    const user = await User.findOne({ taxCode });
-    if (!user) {
-      return res.status(404).json({ error: 'User not found' });
+        await User.deleteOne({ taxCode });
+        await redisClient.del(REDIS_KEYS.user(taxCode));
+        await redisClient.del(REDIS_KEYS.email(user.contact));
+        await redisClient.lRem(REDIS_KEYS.userList, 0, taxCode);
+
+        res.json({ success: true, message: 'User deleted successfully' });
+    } catch (error) {
+        console.error('Error deleting user:', error);
+        res.status(500).json({ error: 'Internal server error' });
     }
-
-    // Delete from MongoDB
-    await User.deleteOne({ taxCode });
-
-    // Delete from Redis cache
-    await redisClient.del(REDIS_KEYS.user(taxCode));
-    await redisClient.del(REDIS_KEYS.email(user.contact));
-
-    res.status(200).json({ message: 'User deleted successfully' });
-
-  } catch (error) {
-    console.error('Error deleting user:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
 };
-
-// Optional: Background job to clean up old cache entries
-const cleanupOldCache = async () => {
-  try {
-    const userKeys = await redisClient.keys('user:*');
-    const emailKeys = await redisClient.keys('email:*');
-    
-    for (const key of [...userKeys, ...emailKeys]) {
-      const ttl = await redisClient.ttl(key);
-      if (ttl <= 0) {
-        await redisClient.del(key);
-      }
-    }
-  } catch (error) {
-    console.error('Cache cleanup error:', error);
-  }
-};
-
-// Run cleanup every hour
-setInterval(cleanupOldCache, 60 * 60 * 1000);
 
 export const getLuckyDrawEligibleUsers = async (req, res) => {
-  try {
-      const TICKET_THRESHOLD = 200;
-      console.log('Accessing getLuckyDrawEligibleUsers');
+    try {
+        const TICKET_THRESHOLD = 200;
+        const users = await User.aggregate([
+            {
+                $project: {
+                    _id: 0,
+                    name: 1,
+                    taxCode: 1,
+                    contact: 1,
+                    totalTickets: 1,
+                    luckyDrawStatus: {
+                        isEligible: { $gte: ["$totalTickets", TICKET_THRESHOLD] },
+                        ticketsNeeded: {
+                            $max: [{ $subtract: [TICKET_THRESHOLD, "$totalTickets"] }, 0]
+                        }
+                    }
+                }
+            },
+            { $sort: { totalTickets: -1 } }
+        ]);
 
-      // Get users from MongoDB
-      const users = await User.aggregate([
-          {
-              $project: {
-                  _id: 0,
-                  name: 1,
-                  taxCode: 1,
-                  contact: 1,
-                  totalTickets: 1,
-                  createdAt: 1,
-                  luckyDrawStatus: {
-                      isEligible: { $gte: ["$totalTickets", TICKET_THRESHOLD] },
-                      ticketsNeeded: {
-                          $max: [
-                              { $subtract: [TICKET_THRESHOLD, "$totalTickets"] },
-                              0
-                          ]
-                      },
-                      message: {
-                          $cond: {
-                              if: { $gte: ["$totalTickets", TICKET_THRESHOLD] },
-                              then: {
-                                  $concat: [
-                                      "Congratulations! You are eligible for lucky draw with ",
-                                      { $toString: "$totalTickets" },
-                                      " tickets!"
-                                  ]
-                              },
-                              else: {
-                                  $concat: [
-                                      "You need ",
-                                      { $toString: { $subtract: [TICKET_THRESHOLD, "$totalTickets"] } },
-                                      " more tickets to be eligible for lucky draw"
-                                  ]
-                              }
-                          }
-                      }
-                  }
-              }
-          },
-          {
-              $sort: { totalTickets: -1 }
-          }
-      ]);
-
-      console.log('Aggregation results:', users);
-
-      if (!users || users.length === 0) {
-          return res.json({
-              success: true,
-              message: "No users found",
-              totalUsers: 0,
-              threshold: TICKET_THRESHOLD,
-              data: []
-          });
-      }
-
-      res.json({
-          success: true,
-          totalUsers: users.length,
-          threshold: TICKET_THRESHOLD,
-          data: users
-      });
-
-  } catch (error) {
-      console.error('Error in getLuckyDrawEligibleUsers:', error);
-      res.status(500).json({
-          success: false,
-          message: "Error fetching lucky draw eligibility",
-          error: error.message
-      });
-  }
+        res.json({
+            success: true,
+            totalUsers: users.length,
+            threshold: TICKET_THRESHOLD,
+            data: users
+        });
+    } catch (error) {
+        console.error('Error in getLuckyDrawEligibleUsers:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
 };
 
 export const checkUserEligibility = async (req, res) => {
