@@ -250,6 +250,179 @@ const cleanupOldCache = async () => {
 // Run cleanup every hour
 setInterval(cleanupOldCache, 60 * 60 * 1000);
 
+export const getLuckyDrawEligibleUsers = async (req, res) => {
+  try {
+      const TICKET_THRESHOLD = 200;
+      console.log('Accessing getLuckyDrawEligibleUsers');
 
+      // Get users from MongoDB
+      const users = await User.aggregate([
+          {
+              $project: {
+                  _id: 0,
+                  name: 1,
+                  taxCode: 1,
+                  contact: 1,
+                  totalTickets: 1,
+                  createdAt: 1,
+                  luckyDrawStatus: {
+                      isEligible: { $gte: ["$totalTickets", TICKET_THRESHOLD] },
+                      ticketsNeeded: {
+                          $max: [
+                              { $subtract: [TICKET_THRESHOLD, "$totalTickets"] },
+                              0
+                          ]
+                      },
+                      message: {
+                          $cond: {
+                              if: { $gte: ["$totalTickets", TICKET_THRESHOLD] },
+                              then: {
+                                  $concat: [
+                                      "Congratulations! You are eligible for lucky draw with ",
+                                      { $toString: "$totalTickets" },
+                                      " tickets!"
+                                  ]
+                              },
+                              else: {
+                                  $concat: [
+                                      "You need ",
+                                      { $toString: { $subtract: [TICKET_THRESHOLD, "$totalTickets"] } },
+                                      " more tickets to be eligible for lucky draw"
+                                  ]
+                              }
+                          }
+                      }
+                  }
+              }
+          },
+          {
+              $sort: { totalTickets: -1 }
+          }
+      ]);
 
+      console.log('Aggregation results:', users);
 
+      if (!users || users.length === 0) {
+          return res.json({
+              success: true,
+              message: "No users found",
+              totalUsers: 0,
+              threshold: TICKET_THRESHOLD,
+              data: []
+          });
+      }
+
+      res.json({
+          success: true,
+          totalUsers: users.length,
+          threshold: TICKET_THRESHOLD,
+          data: users
+      });
+
+  } catch (error) {
+      console.error('Error in getLuckyDrawEligibleUsers:', error);
+      res.status(500).json({
+          success: false,
+          message: "Error fetching lucky draw eligibility",
+          error: error.message
+      });
+  }
+};
+
+export const checkUserEligibility = async (req, res) => {
+  try {
+      const { taxCode } = req.params;
+      const TICKET_THRESHOLD = 200;
+
+      console.log('Checking eligibility for taxCode:', taxCode);
+
+      const userEligibility = await User.aggregate([
+          // Match the user by taxCode
+          {
+              $match: {
+                  taxCode: taxCode
+              }
+          },
+          // Project the needed fields and calculate eligibility
+          {
+              $project: {
+                  _id: 0,
+                  name: 1,
+                  taxCode: 1,
+                  contact: 1,
+                  totalTickets: { $ifNull: ["$totalTickets", 0] },
+                  eligibilityStatus: {
+                      isEligible: { 
+                          $gte: [{ $ifNull: ["$totalTickets", 0] }, TICKET_THRESHOLD] 
+                      },
+                      currentTickets: { $ifNull: ["$totalTickets", 0] },
+                      ticketsNeeded: {
+                          $max: [
+                              { 
+                                  $subtract: [
+                                      TICKET_THRESHOLD, 
+                                      { $ifNull: ["$totalTickets", 0] }
+                                  ] 
+                              },
+                              0
+                          ]
+                      },
+                      message: {
+                          $cond: {
+                              if: { $gte: [{ $ifNull: ["$totalTickets", 0] }, TICKET_THRESHOLD] },
+                              then: {
+                                  $concat: [
+                                      "Congratulations! You're eligible for the lucky draw with ",
+                                      { $toString: { $ifNull: ["$totalTickets", 0] } },
+                                      " tickets!"
+                                  ]
+                              },
+                              else: {
+                                  $let: {
+                                      vars: {
+                                          needed: {
+                                              $subtract: [
+                                                  TICKET_THRESHOLD,
+                                                  { $ifNull: ["$totalTickets", 0] }
+                                              ]
+                                          }
+                                      },
+                                      in: {
+                                          $concat: [
+                                              "You need ",
+                                              { $toString: "$$needed" },
+                                              " more tickets to be eligible for lucky draw"
+                                          ]
+                                      }
+                                  }
+                              }
+                          }
+                      }
+                  }
+              }
+          }
+      ]);
+
+      console.log('Aggregation result:', userEligibility);
+
+      if (!userEligibility || userEligibility.length === 0) {
+          return res.status(404).json({
+              success: false,
+              message: `User with tax code ${taxCode} not found`
+          });
+      }
+
+      res.json({
+          success: true,
+          data: userEligibility[0]
+      });
+
+  } catch (error) {
+      console.error("Error checking user eligibility:", error);
+      res.status(500).json({
+          success: false,
+          message: "Error checking user eligibility",
+          error: error.message
+      });
+  }
+};
