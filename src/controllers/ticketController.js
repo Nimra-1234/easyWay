@@ -1,21 +1,53 @@
 import redisClient from '../config/redisClient.js';
 import User from '../models/userModel.js';
 import { v4 as uuidv4 } from 'uuid';
+import { monitorRedisMemory } from '../utils/redisMemoryMonitor.js';
 
 const TICKET_EXPIRY_SECONDS = 70 * 60; // 70 minutes in seconds
+
 const REDIS_KEYS = {
     ticket: (ticketId) => `ticket:${ticketId}`,
     userActiveTickets: (taxCode) => `user:${taxCode}:active_tickets`,
-    userCache: (taxCode) => `user:${taxCode}`
+    user: (taxCode) => `user:${taxCode}`,
+    email: (email) => `email:${email}`,
+    userList: 'cached_users_list'
 };
 
 export const createTicket = async (req, res) => {
     const { taxCode, routeId, tripId } = req.body;
 
     try {
-        const user = await User.findOne({ taxCode });
-        if (!user) {
-            return res.status(404).json({ error: 'User not found. Please register first.' });
+        // First check Redis cache
+        let user;
+        const cachedUser = await redisClient.hGetAll(REDIS_KEYS.user(taxCode));
+        
+        if (Object.keys(cachedUser).length > 0) {
+            user = {
+                ...cachedUser,
+                totalTickets: parseInt(cachedUser.totalTickets)
+            };
+        } else {
+            // If not in cache, get from MongoDB
+            user = await User.findOne({ taxCode });
+            if (!user) {
+                return res.status(404).json({ error: 'User not found. Please register first.' });
+            }
+            
+            // Cache user data if found
+            await monitorRedisMemory.checkAndMigrateUsers();
+            if (user) {
+                const multi = redisClient.multi();
+                multi.hSet(REDIS_KEYS.user(user.taxCode), {
+                    name: user.name,
+                    taxCode: user.taxCode,
+                    contact: user.contact,
+                    createdAt: user.createdAt.toISOString(),
+                    updatedAt: user.updatedAt.toISOString(),
+                    totalTickets: user.totalTickets.toString()
+                });
+                multi.rPush(REDIS_KEYS.userList, user.taxCode);
+                await multi.exec();
+            }
         }
 
         const ticketId = uuidv4();
@@ -46,22 +78,32 @@ export const createTicket = async (req, res) => {
         
         await multi.exec();
 
-        // Update MongoDB ticket count
-        await User.updateOne(
+        // Update MongoDB
+        const updatedUser = await User.findOneAndUpdate(
             { taxCode },
             { 
                 $inc: { totalTickets: 1 },
-                $set: { lastTicketAt: now }
-            }
+                $set: { 
+                    lastTicketAt: now,
+                    updatedAt: now 
+                }
+            },
+            { new: true }
         );
 
         // Update Redis cache if it exists
-        const cachedUser = await redisClient.hGetAll(REDIS_KEYS.userCache(taxCode));
-        if (Object.keys(cachedUser).length > 0) {
-            await redisClient.hIncrBy(REDIS_KEYS.userCache(taxCode), 'totalTickets', 1);
+        const userInCache = await redisClient.exists(REDIS_KEYS.user(taxCode));
+        if (userInCache) {
+            const multi = redisClient.multi();
+            multi.hSet(REDIS_KEYS.user(taxCode), {
+                totalTickets: updatedUser.totalTickets.toString(),
+                updatedAt: now.toISOString()
+            });
+            await multi.exec();
         }
 
         res.status(201).json({ 
+            success: true,
             message: 'Ticket created successfully', 
             ticket,
             expiresIn: `${TICKET_EXPIRY_SECONDS} seconds`
@@ -76,20 +118,36 @@ export const getUserTickets = async (req, res) => {
     const { taxCode } = req.params;
     
     try {
-        // Check if user exists in MongoDB
-        const user = await User.findOne({ taxCode });
-        if (!user) {
-            return res.status(404).json({ error: 'User not found' });
+        // Check Redis cache first
+        let user;
+        const cachedUser = await redisClient.hGetAll(REDIS_KEYS.user(taxCode));
+        
+        if (Object.keys(cachedUser).length > 0) {
+            user = {
+                ...cachedUser,
+                totalTickets: parseInt(cachedUser.totalTickets)
+            };
+        } else {
+            user = await User.findOne({ taxCode });
+            if (!user) {
+                return res.status(404).json({ error: 'User not found' });
+            }
         }
 
-        // Get active ticket IDs from Redis
-        // Redis will automatically remove expired sets, so we only get valid tickets
         const activeTicketIds = await redisClient.sMembers(REDIS_KEYS.userActiveTickets(taxCode));
 
         res.status(200).json({
-            activeTicketCount: activeTicketIds.length,
-            totalPurchased: user.totalTickets || 0,
-            activeTicketIds: activeTicketIds
+            success: true,
+            user: {
+                name: user.name,
+                taxCode: user.taxCode,
+                contact: user.contact
+            },
+            tickets: {
+                activeCount: activeTicketIds.length,
+                totalPurchased: user.totalTickets || 0,
+                activeTicketIds: activeTicketIds
+            }
         });
     } catch (error) {
         console.error('Error retrieving user tickets:', error);
@@ -110,8 +168,11 @@ export const getTicket = async (req, res) => {
         const ttl = await redisClient.ttl(REDIS_KEYS.ticket(ticketId));
         
         res.status(200).json({
-            ...ticket,
-            timeRemaining: `${ttl} seconds`
+            success: true,
+            ticket: {
+                ...ticket,
+                timeRemaining: `${ttl} seconds`
+            }
         });
     } catch (error) {
         console.error('Error retrieving ticket:', error);

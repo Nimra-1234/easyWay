@@ -1,4 +1,5 @@
 import express from 'express';
+import { isAdmin } from '../middleware/adminMiddleware.js';
 import { createUser, getUser, updateUser, deleteUser,getLuckyDrawEligibleUsers,checkUserEligibility } from '../controllers/userController.js'; // Import the user controller functions
 
 const router = express.Router();
@@ -6,47 +7,33 @@ const router = express.Router();
 /**
  * @swagger
  * components:
- *   schemas:
- *     EligibilityStatus:
- *       type: object
- *       properties:
- *         isEligible:
- *           type: boolean
- *           example: true
- *         message:
- *           type: string
- *           example: "Congratulations! You are eligible for the lucky draw with 250 tickets"
- *         extraEntries:
- *           type: integer
- *           example: 1
- *     
- *     EligibleUser:
- *       type: object
- *       properties:
- *         name:
- *           type: string
- *           example: "John Doe"
- *         contact:
- *           type: string
- *           example: "string@gmail.com"
- *         totalTickets:
- *           type: integer
- *           example: 250
- *         eligibilityStatus:
- *           $ref: '#/components/schemas/EligibilityStatus'
- *         createdAt:
- *           type: string
- *           format: date-time
- *           example: "2025-01-16T20:21:48.521Z"
- *
- * /api/users/lucky-draw:
+ *   securitySchemes:
+ *     adminAuth:
+ *       type: apiKey
+ *       in: header
+ *       name: tax-code
+ *       description: Admin tax code for authentication
+ */
+/**
+ * @swagger
+ * /api/users/admin/lucky-draw:
  *   get:
- *     summary: Get all users eligible for lucky draw
- *     tags: [Users]
- *     description: Retrieves all users who have bought more than 200 tickets and are eligible for lucky draw
+ *     summary: Admin endpoint to get detailed lucky draw data
+ *     tags: [Admin]
+ *     security:
+ *       - adminAuth: []
+ *     parameters:
+ *       - in: header
+ *         name: tax-code
+ *         schema:
+ *           type: string
+ *           pattern: ^[A-Z0-9]{14}$
+ *         required: true
+ *         description: Admin tax code for authentication
+ *         example: ADMIN12345MAIN
  *     responses:
  *       200:
- *         description: List of eligible users
+ *         description: Detailed lucky draw data
  *         content:
  *           application/json:
  *             schema:
@@ -55,27 +42,80 @@ const router = express.Router();
  *                 success:
  *                   type: boolean
  *                   example: true
- *                 totalEligibleUsers:
+ *                 totalUsers:
  *                   type: integer
- *                   example: 2
- *                 summary:
- *                   type: object
- *                   properties:
- *                     threshold:
- *                       type: integer
- *                       example: 200
- *                     drawDate:
- *                       type: string
- *                       example: "2025-02-01"
- *                     prizePools:
- *                       type: array
- *                       items:
- *                         type: string
- *                       example: ["1st Prize: $1000", "2nd Prize: $500", "3rd Prize: $250"]
+ *                   example: 50
+ *                 eligibleUsers:
+ *                   type: integer
+ *                   example: 10
+ *                 threshold:
+ *                   type: integer
+ *                   description: Number of tickets needed for eligibility
+ *                   example: 200
  *                 data:
  *                   type: array
  *                   items:
- *                     $ref: '#/components/schemas/EligibleUser'
+ *                     type: object
+ *                     properties:
+ *                       name:
+ *                         type: string
+ *                         example: "John Doe"
+ *                       taxCode:
+ *                         type: string
+ *                         example: "USER123456789"
+ *                       contact:
+ *                         type: string
+ *                         example: "john@example.com"
+ *                       totalTickets:
+ *                         type: integer
+ *                         example: 250
+ *                       isEligible:
+ *                         type: boolean
+ *                         example: true
+ *                       ticketsNeeded:
+ *                         type: integer
+ *                         example: 0
+ *                       lastTicketAt:
+ *                         type: string
+ *                         format: date-time
+ *                         example: "2025-01-17T23:30:00Z"
+ *                 metadata:
+ *                   type: object
+ *                   properties:
+ *                     lastUpdated:
+ *                       type: string
+ *                       format: date-time
+ *                       example: "2025-01-17T23:30:00Z"
+ *                     nextDrawDate:
+ *                       type: string
+ *                       format: date
+ *                       example: "2025-02-01"
+ *       401:
+ *         description: Authentication failed
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 error:
+ *                   type: string
+ *                   example: "Admin authentication required"
+ *       403:
+ *         description: Not authorized
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 error:
+ *                   type: string
+ *                   example: "Admin access required"
  *       500:
  *         description: Server error
  *         content:
@@ -86,13 +126,11 @@ const router = express.Router();
  *                 success:
  *                   type: boolean
  *                   example: false
- *                 message:
- *                   type: string
  *                 error:
  *                   type: string
- *
+ *                   example: "Internal server error"
  */
-router.get('/lucky-draw', getLuckyDrawEligibleUsers);
+router.get('/admin/lucky-draw', isAdmin, getLuckyDrawEligibleUsers);  // Admin endpoint
 
 /**
  * @swagger

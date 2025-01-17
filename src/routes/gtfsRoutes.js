@@ -1,4 +1,5 @@
 import express from 'express';
+import { isAdmin } from '../middleware/adminMiddleware.js';
 import { getBusyStops, calculateTripDuration,getRoutesByTripCount,calculateRouteAverageDuration} from '../controllers/gtfsController.js';
 
 const router = express.Router();
@@ -145,11 +146,22 @@ router.get('/trips/:tripId/duration', calculateTripDuration);
 
 /**
  * @swagger
- * /api/gtfs/routes/trip-analysis:
+ * /api/gtfs/admin/routes/trip-analysis:
  *   get:
- *     summary: Get routes with highest and lowest number of trips
- *     tags: [RouteRanking - Highest and Lowest trips]
- *     description: Retrieves information about routes with the most and least number of trips
+ *     summary: Get routes with highest and lowest number of trips (Admin Only)
+ *     tags: [Admin]
+ *     security:
+ *       - adminAuth: []
+ *     description: Admin endpoint to retrieve information about routes with the most and least number of trips
+ *     parameters:
+ *       - in: header
+ *         name: tax-code
+ *         schema:
+ *           type: string
+ *           pattern: ^[A-Z0-9]{14}$
+ *         required: true
+ *         description: Admin tax code for authentication
+ *         example: ADMIN12345MAIN
  *     responses:
  *       200:
  *         description: Successfully retrieved route analysis
@@ -176,6 +188,10 @@ router.get('/trips/:tripId/duration', calculateTripDuration);
  *                         trip_count:
  *                           type: number
  *                           example: 150
+ *                         last_updated:
+ *                           type: string
+ *                           format: date-time
+ *                           example: "2025-01-17T23:30:00Z"
  *                     smallest_route:
  *                       type: object
  *                       properties:
@@ -188,6 +204,49 @@ router.get('/trips/:tripId/duration', calculateTripDuration);
  *                         trip_count:
  *                           type: number
  *                           example: 25
+ *                         last_updated:
+ *                           type: string
+ *                           format: date-time
+ *                           example: "2025-01-17T23:30:00Z"
+ *                     metadata:
+ *                       type: object
+ *                       properties:
+ *                         total_routes:
+ *                           type: number
+ *                           example: 50
+ *                         average_trips:
+ *                           type: number
+ *                           example: 75
+ *                         analysis_timestamp:
+ *                           type: string
+ *                           format: date-time
+ *                           example: "2025-01-17T23:30:00Z"
+ *       401:
+ *         description: Authentication failed
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 error:
+ *                   type: string
+ *                   example: "Admin authentication required"
+ *       403:
+ *         description: Not authorized
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 error:
+ *                   type: string
+ *                   example: "Admin access required"
  *       404:
  *         description: No routes found
  *         content:
@@ -215,8 +274,7 @@ router.get('/trips/:tripId/duration', calculateTripDuration);
  *                   type: string
  *                   example: "Error analyzing routes"
  */
-router.get('/routes/trip-analysis', getRoutesByTripCount);
-
+router.get('/admin/routes/trip-analysis', isAdmin, getRoutesByTripCount);
 
 /**
  * @swagger

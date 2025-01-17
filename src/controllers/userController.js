@@ -14,63 +14,64 @@ const REDIS_KEYS = {
 };
 
 const cacheUserData = async (userData) => {
-  try {
-      // Check if we need to clear cache
-      await monitorRedisMemory.checkAndMigrateUsers();
+    try {
+        await monitorRedisMemory.checkAndMigrateUsers();
 
-      // If cache was cleared, this will be adding to an empty cache
-      const multi = redisClient.multi();
-      
-      // Cache user data
-      multi.hSet(`user:${userData.taxCode}`, {
-          name: userData.name,
-          taxCode: userData.taxCode,
-          contact: userData.contact,
-          createdAt: userData.createdAt.toISOString(),
-          totalTickets: userData.totalTickets?.toString() || '0'
-      });
+        const multi = redisClient.multi();
+        
+        multi.hSet(REDIS_KEYS.user(userData.taxCode), {
+            name: userData.name,
+            taxCode: userData.taxCode,
+            contact: userData.contact,
+            createdAt: userData.createdAt.toISOString(),
+            updatedAt: userData.updatedAt ? userData.updatedAt.toISOString() : userData.createdAt.toISOString(),
+            totalTickets: userData.totalTickets?.toString() || '0'
+        });
 
-      // Cache email lookup
-      multi.set(`email:${userData.contact}`, userData.taxCode);
-      
-      // Add to tracking list
-      multi.rPush('cached_users_list', userData.taxCode);
+        multi.set(REDIS_KEYS.email(userData.contact), userData.taxCode);
+        multi.rPush(REDIS_KEYS.userList, userData.taxCode);
 
-      await multi.exec();
-      return { success: true };
-  } catch (error) {
-      console.error('Redis caching error:', error);
-      return { success: false };
-  }
+        await multi.exec();
+        return { success: true };
+    } catch (error) {
+        console.error('Redis caching error:', error);
+        return { success: false };
+    }
 };
 
 export const createUser = async (req, res) => {
     const { name, taxCode, contact } = req.body;
     try {
-        // 1. Validate input
         if (!name || !taxCode || !contact) {
             return res.status(400).json({ error: 'Missing required fields' });
         }
+        if (!taxCodeRegex.test(taxCode)) {
+            return res.status(400).json({ error: 'Invalid tax code format' });
+        }
+        if (!emailRegex.test(contact)) {
+            return res.status(400).json({ error: 'Invalid email format' });
+        }
 
-        // 2. Check existing user
         const existingUser = await User.findOne({ $or: [{ taxCode }, { contact }] });
         if (existingUser) {
             return res.status(400).json({ 
-                error: 'User already exists'
+                error: existingUser.taxCode === taxCode ? 
+                    'Tax code already exists' : 
+                    'Email already exists' 
             });
         }
 
-        // 3. Create in MongoDB FIRST (Source of Truth)
+        const now = new Date();
         const user = new User({
             name,
             taxCode,
             contact,
-            createdAt: new Date(),
+            createdAt: now,
+            updatedAt: now,
             totalTickets: 0
         });
         await user.save();
 
-        // 4. Cache in Redis (Performance Layer)
         await cacheUserData(user);
 
         res.status(201).json({
@@ -81,6 +82,7 @@ export const createUser = async (req, res) => {
                 taxCode,
                 contact,
                 createdAt: user.createdAt,
+                updatedAt: user.updatedAt,
                 totalTickets: 0
             }
         });
@@ -94,13 +96,11 @@ export const updateUser = async (req, res) => {
     const { taxCode } = req.params;
     const { name, contact } = req.body;
     try {
-        // 1. Find existing user
         const user = await User.findOne({ taxCode });
         if (!user) {
             return res.status(404).json({ error: 'User not found' });
         }
 
-        // 2. Prepare updates
         const updates = {};
         if (name && name !== user.name) updates.name = name;
         if (contact && contact !== user.contact) {
@@ -114,26 +114,31 @@ export const updateUser = async (req, res) => {
             return res.status(400).json({ error: 'No changes provided' });
         }
 
-        // 3. Update in MongoDB
+        updates.updatedAt = new Date();
+
         const updatedUser = await User.findOneAndUpdate(
             { taxCode },
             updates,
             { new: true }
         );
 
-        // 4. Update Redis cache
         if (updates.contact) {
-            // Remove old email lookup
             await redisClient.del(REDIS_KEYS.email(user.contact));
         }
         
-        // Update cache with new data
         await cacheUserData(updatedUser);
 
         res.json({
             success: true,
             message: 'User updated successfully',
-            user: updatedUser
+            user: {
+                name: updatedUser.name,
+                taxCode: updatedUser.taxCode,
+                contact: updatedUser.contact,
+                createdAt: updatedUser.createdAt,
+                updatedAt: updatedUser.updatedAt,
+                totalTickets: updatedUser.totalTickets
+            }
         });
     } catch (error) {
         console.error('Error updating user:', error);
@@ -146,7 +151,18 @@ export const getUser = async (req, res) => {
     try {
         const cachedUser = await redisClient.hGetAll(REDIS_KEYS.user(taxCode));
         if (Object.keys(cachedUser).length > 0) {
-            return res.json({ success: true, user: cachedUser });
+            // Parse dates back to Date objects for consistent response
+            const user = {
+                ...cachedUser,
+                createdAt: new Date(cachedUser.createdAt),
+                updatedAt: new Date(cachedUser.updatedAt),
+                totalTickets: parseInt(cachedUser.totalTickets)
+            };
+            return res.json({ 
+                success: true, 
+                user,
+                source: 'cache'
+            });
         }
 
         const user = await User.findOne({ taxCode });
@@ -155,7 +171,18 @@ export const getUser = async (req, res) => {
         }
 
         await cacheUserData(user);
-        res.json({ success: true, user });
+        res.json({ 
+            success: true, 
+            user: {
+                name: user.name,
+                taxCode: user.taxCode,
+                contact: user.contact,
+                createdAt: user.createdAt,
+                updatedAt: user.updatedAt,
+                totalTickets: user.totalTickets
+            },
+            source: 'database'
+        });
     } catch (error) {
         console.error('Error retrieving user:', error);
         res.status(500).json({ error: 'Internal server error' });
@@ -175,7 +202,11 @@ export const deleteUser = async (req, res) => {
         await redisClient.del(REDIS_KEYS.email(user.contact));
         await redisClient.lRem(REDIS_KEYS.userList, 0, taxCode);
 
-        res.json({ success: true, message: 'User deleted successfully' });
+        res.json({ 
+            success: true, 
+            message: 'User deleted successfully',
+            deletedAt: new Date()
+        });
     } catch (error) {
         console.error('Error deleting user:', error);
         res.status(500).json({ error: 'Internal server error' });
@@ -193,6 +224,8 @@ export const getLuckyDrawEligibleUsers = async (req, res) => {
                     taxCode: 1,
                     contact: 1,
                     totalTickets: 1,
+                    createdAt: 1,
+                    updatedAt: 1,
                     luckyDrawStatus: {
                         isEligible: { $gte: ["$totalTickets", TICKET_THRESHOLD] },
                         ticketsNeeded: {
@@ -208,7 +241,8 @@ export const getLuckyDrawEligibleUsers = async (req, res) => {
             success: true,
             totalUsers: users.length,
             threshold: TICKET_THRESHOLD,
-            data: users
+            data: users,
+            timestamp: new Date()
         });
     } catch (error) {
         console.error('Error in getLuckyDrawEligibleUsers:', error);
@@ -217,99 +251,61 @@ export const getLuckyDrawEligibleUsers = async (req, res) => {
 };
 
 export const checkUserEligibility = async (req, res) => {
-  try {
-      const { taxCode } = req.params;
-      const TICKET_THRESHOLD = 200;
+    try {
+        const { taxCode } = req.params;
+        const TICKET_THRESHOLD = 200;
 
-      console.log('Checking eligibility for taxCode:', taxCode);
+        const userEligibility = await User.aggregate([
+            {
+                $match: {
+                    taxCode: taxCode
+                }
+            },
+            {
+                $project: {
+                    _id: 0,
+                    name: 1,
+                    taxCode: 1,
+                    contact: 1,
+                    createdAt: 1,
+                    updatedAt: 1,
+                    totalTickets: { $ifNull: ["$totalTickets", 0] },
+                    eligibilityStatus: {
+                        isEligible: { 
+                            $gte: [{ $ifNull: ["$totalTickets", 0] }, TICKET_THRESHOLD] 
+                        },
+                        currentTickets: { $ifNull: ["$totalTickets", 0] },
+                        ticketsNeeded: {
+                            $max: [
+                                { 
+                                    $subtract: [
+                                        TICKET_THRESHOLD, 
+                                        { $ifNull: ["$totalTickets", 0] }
+                                    ] 
+                                },
+                                0
+                            ]
+                        }
+                    }
+                }
+            }
+        ]);
 
-      const userEligibility = await User.aggregate([
-          // Match the user by taxCode
-          {
-              $match: {
-                  taxCode: taxCode
-              }
-          },
-          // Project the needed fields and calculate eligibility
-          {
-              $project: {
-                  _id: 0,
-                  name: 1,
-                  taxCode: 1,
-                  contact: 1,
-                  totalTickets: { $ifNull: ["$totalTickets", 0] },
-                  eligibilityStatus: {
-                      isEligible: { 
-                          $gte: [{ $ifNull: ["$totalTickets", 0] }, TICKET_THRESHOLD] 
-                      },
-                      currentTickets: { $ifNull: ["$totalTickets", 0] },
-                      ticketsNeeded: {
-                          $max: [
-                              { 
-                                  $subtract: [
-                                      TICKET_THRESHOLD, 
-                                      { $ifNull: ["$totalTickets", 0] }
-                                  ] 
-                              },
-                              0
-                          ]
-                      },
-                      message: {
-                          $cond: {
-                              if: { $gte: [{ $ifNull: ["$totalTickets", 0] }, TICKET_THRESHOLD] },
-                              then: {
-                                  $concat: [
-                                      "Congratulations! You're eligible for the lucky draw with ",
-                                      { $toString: { $ifNull: ["$totalTickets", 0] } },
-                                      " tickets!"
-                                  ]
-                              },
-                              else: {
-                                  $let: {
-                                      vars: {
-                                          needed: {
-                                              $subtract: [
-                                                  TICKET_THRESHOLD,
-                                                  { $ifNull: ["$totalTickets", 0] }
-                                              ]
-                                          }
-                                      },
-                                      in: {
-                                          $concat: [
-                                              "You need ",
-                                              { $toString: "$$needed" },
-                                              " more tickets to be eligible for lucky draw"
-                                          ]
-                                      }
-                                  }
-                              }
-                          }
-                      }
-                  }
-              }
-          }
-      ]);
+        if (!userEligibility || userEligibility.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: `User with tax code ${taxCode} not found`
+            });
+        }
 
-      console.log('Aggregation result:', userEligibility);
+        res.json({
+            success: true,
+            data: userEligibility[0],
+            checkedAt: new Date()
+        });
 
-      if (!userEligibility || userEligibility.length === 0) {
-          return res.status(404).json({
-              success: false,
-              message: `User with tax code ${taxCode} not found`
-          });
-      }
-
-      res.json({
-          success: true,
-          data: userEligibility[0]
-      });
-
-  } catch (error) {
-      console.error("Error checking user eligibility:", error);
-      res.status(500).json({
-          success: false,
-          message: "Error checking user eligibility",
-          error: error.message
-      });
-  }
+    } catch (error) {
+        console.error("Error checking user eligibility:", error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
 };
