@@ -152,16 +152,13 @@ router.get('/trips/:tripId/duration', calculateTripDuration);
  *     tags: [Admin]
  *     security:
  *       - adminAuth: []
- *     description: Admin endpoint to retrieve information about routes with the most and least number of trips
  *     parameters:
  *       - in: header
- *         name: tax-code
+ *         name: admin-code
  *         schema:
  *           type: string
- *           pattern: ^[A-Z0-9]{14}$
  *         required: true
- *         description: Admin tax code for authentication
- *         example: ADMIN12345MAIN
+ *         description: Secure admin authentication code
  *     responses:
  *       200:
  *         description: Successfully retrieved route analysis
@@ -177,102 +174,93 @@ router.get('/trips/:tripId/duration', calculateTripDuration);
  *                   type: object
  *                   properties:
  *                     largest_route:
- *                       type: object
- *                       properties:
- *                         route_id:
- *                           type: string
- *                           example: "211"
- *                         route_name:
- *                           type: string
- *                           example: "211"
- *                         trip_count:
- *                           type: number
- *                           example: 150
- *                         last_updated:
- *                           type: string
- *                           format: date-time
- *                           example: "2025-01-17T23:30:00Z"
+ *                       $ref: '#/components/schemas/RouteAnalysis'
  *                     smallest_route:
- *                       type: object
- *                       properties:
- *                         route_id:
- *                           type: string
- *                           example: "C2"
- *                         route_name:
- *                           type: string
- *                           example: "C2"
- *                         trip_count:
- *                           type: number
- *                           example: 25
- *                         last_updated:
- *                           type: string
- *                           format: date-time
- *                           example: "2025-01-17T23:30:00Z"
+ *                       $ref: '#/components/schemas/RouteAnalysis'
  *                     metadata:
- *                       type: object
- *                       properties:
- *                         total_routes:
- *                           type: number
- *                           example: 50
- *                         average_trips:
- *                           type: number
- *                           example: 75
- *                         analysis_timestamp:
- *                           type: string
- *                           format: date-time
- *                           example: "2025-01-17T23:30:00Z"
+ *                       $ref: '#/components/schemas/AnalysisMetadata'
  *       401:
- *         description: Authentication failed
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                   example: false
- *                 error:
- *                   type: string
- *                   example: "Admin authentication required"
+ *         $ref: '#/components/responses/AdminUnauthorized'
  *       403:
- *         description: Not authorized
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                   example: false
- *                 error:
- *                   type: string
- *                   example: "Admin access required"
+ *         description: Invalid admin credentials
  *       404:
  *         description: No routes found
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                   example: false
- *                 message:
- *                   type: string
- *                   example: "No routes found"
  *       500:
  *         description: Server error
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                   example: false
- *                 error:
- *                   type: string
- *                   example: "Error analyzing routes"
+ */
+
+/**
+ * @swagger
+ * components:
+ *   schemas:
+ *     LuckyDrawUser:
+ *       type: object
+ *       properties:
+ *         name:
+ *           type: string
+ *           example: "John Doe"
+ *         taxCode:
+ *           type: string
+ *           example: "USER123456789"
+ *         contact:
+ *           type: string
+ *           example: "john@example.com"
+ *         totalTickets:
+ *           type: integer
+ *           example: 250
+ *         isEligible:
+ *           type: boolean
+ *           example: true
+ *         ticketsNeeded:
+ *           type: integer
+ *           example: 0
+ *         lastTicketAt:
+ *           type: string
+ *           format: date-time
+ *           example: "2025-01-17T23:30:00Z"
+ *     
+ *     DrawMetadata:
+ *       type: object
+ *       properties:
+ *         lastUpdated:
+ *           type: string
+ *           format: date-time
+ *           example: "2025-01-17T23:30:00Z"
+ *         nextDrawDate:
+ *           type: string
+ *           format: date
+ *           example: "2025-02-01"
+ *     
+ *     RouteAnalysis:
+ *       type: object
+ *       properties:
+ *         route_id:
+ *           type: string
+ *           example: "211"
+ *         route_name:
+ *           type: string
+ *           example: "211"
+ *         trip_count:
+ *           type: number
+ *           example: 150
+ *         last_updated:
+ *           type: string
+ *           format: date-time
+ *           example: "2025-01-17T23:30:00Z"
+ *     
+ *     AnalysisMetadata:
+ *       type: object
+ *       properties:
+ *         total_routes:
+ *           type: number
+ *           example: 50
+ *         average_trips:
+ *           type: number
+ *           example: 75
+ *         analysis_timestamp:
+ *           type: string
+ *           format: date-time
+ *           example: "2025-01-17T23:30:00Z"
  */
 router.get('/admin/routes/trip-analysis', isAdmin, getRoutesByTripCount);
 

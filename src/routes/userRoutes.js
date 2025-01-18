@@ -11,9 +11,25 @@ const router = express.Router();
  *     adminAuth:
  *       type: apiKey
  *       in: header
- *       name: tax-code
- *       description: Admin tax code for authentication
+ *       name: admin-code
+ *       description: Secure admin authentication code
+ * 
+ *   responses:
+ *     AdminUnauthorized:
+ *       description: Admin authentication required
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               success:
+ *                 type: boolean
+ *                 example: false
+ *               error:
+ *                 type: string
+ *                 example: "Admin authentication required"
  */
+
 /**
  * @swagger
  * /api/users/admin/lucky-draw:
@@ -24,13 +40,11 @@ const router = express.Router();
  *       - adminAuth: []
  *     parameters:
  *       - in: header
- *         name: tax-code
+ *         name: admin-code
  *         schema:
  *           type: string
- *           pattern: ^[A-Z0-9]{14}$
  *         required: true
- *         description: Admin tax code for authentication
- *         example: ADMIN12345MAIN
+ *         description: Secure admin authentication code
  *     responses:
  *       200:
  *         description: Detailed lucky draw data
@@ -55,56 +69,13 @@ const router = express.Router();
  *                 data:
  *                   type: array
  *                   items:
- *                     type: object
- *                     properties:
- *                       name:
- *                         type: string
- *                         example: "John Doe"
- *                       taxCode:
- *                         type: string
- *                         example: "USER123456789"
- *                       contact:
- *                         type: string
- *                         example: "john@example.com"
- *                       totalTickets:
- *                         type: integer
- *                         example: 250
- *                       isEligible:
- *                         type: boolean
- *                         example: true
- *                       ticketsNeeded:
- *                         type: integer
- *                         example: 0
- *                       lastTicketAt:
- *                         type: string
- *                         format: date-time
- *                         example: "2025-01-17T23:30:00Z"
+ *                     $ref: '#/components/schemas/LuckyDrawUser'
  *                 metadata:
- *                   type: object
- *                   properties:
- *                     lastUpdated:
- *                       type: string
- *                       format: date-time
- *                       example: "2025-01-17T23:30:00Z"
- *                     nextDrawDate:
- *                       type: string
- *                       format: date
- *                       example: "2025-02-01"
+ *                   $ref: '#/components/schemas/DrawMetadata'
  *       401:
- *         description: Authentication failed
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                   example: false
- *                 error:
- *                   type: string
- *                   example: "Admin authentication required"
+ *         $ref: '#/components/responses/AdminUnauthorized'
  *       403:
- *         description: Not authorized
+ *         description: Invalid admin credentials
  *         content:
  *           application/json:
  *             schema:
@@ -115,20 +86,9 @@ const router = express.Router();
  *                   example: false
  *                 error:
  *                   type: string
- *                   example: "Admin access required"
+ *                   example: "Invalid admin credentials"
  *       500:
  *         description: Server error
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                   example: false
- *                 error:
- *                   type: string
- *                   example: "Internal server error"
  */
 router.get('/admin/lucky-draw', isAdmin, getLuckyDrawEligibleUsers);  // Admin endpoint
 

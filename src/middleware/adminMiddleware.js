@@ -1,30 +1,29 @@
+// src/middleware/adminMiddleware.js
 import redisClient from '../config/redisClient.js';
 import User from '../models/userModel.js';
 
-// src/middleware/adminMiddleware.js
-
-// Fixed admin tax codes
-const ADMIN_TAX_CODES = [
-    'NIMRAADMIN1111',  // Main admin
-    'GUESTADMIN1111'    // Secondary admin
-];
+// Secure admin codes (should be stored in environment variables in production)
+const ADMIN_CODES = {
+    MAIN_ADMIN: 'ADM#NIM$2024#SK',    // Main admin - complex code with special characters
+    GUEST_ADMIN: 'ADM#GST$2024#SK'     // Secondary admin
+};
 
 export const isAdmin = async (req, res, next) => {
     try {
-        const taxCode = req.headers['tax-code'];
+        const adminCode = req.headers['admin-code'];
         
-        if (!taxCode) {
+        if (!adminCode) {
             return res.status(401).json({ 
                 success: false, 
                 error: 'Admin authentication required' 
             });
         }
 
-        // Simple check if tax code is in admin list
-        if (!ADMIN_TAX_CODES.includes(taxCode)) {
+        // Check if provided code matches any admin code
+        if (!Object.values(ADMIN_CODES).includes(adminCode)) {
             return res.status(403).json({ 
                 success: false, 
-                error: 'Admin access required' 
+                error: 'Invalid admin credentials' 
             });
         }
 
