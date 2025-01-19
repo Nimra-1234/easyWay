@@ -5,7 +5,7 @@ import { monitorRedisMemory } from '../utils/redisMemoryMonitor.js';
 
 const taxCodeRegex = /^[a-zA-Z0-9]{14}$/;
 const emailRegex = /^\S+@\S+\.\S+$/;
-const MAX_USERS_IN_CACHE = 6;
+const MAX_USERS_IN_CACHE = 6000;
 
 const REDIS_KEYS = {
     user: (taxCode) => `user:${taxCode}`,

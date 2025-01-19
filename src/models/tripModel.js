@@ -47,4 +47,7 @@ tripSchema.methods.getNextStop = function(currentStopId) {
 };
 
 const Trip = mongoose.model('Trip', tripSchema);
+
+tripSchema.index({ trip_id: 1 }, { unique: true });
+
 export default Trip;

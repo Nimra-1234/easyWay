@@ -8,13 +8,16 @@ const stopTimeSchema = new mongoose.Schema({
 }, { _id: false });
 
 const stopSchema = new mongoose.Schema({
-    stop_id: { type: String, required: true, unique: true },
+    stop_id: { type: String, required: true, unique: true },  // This automatically creates a unique index
     stop_name: String,
     stop_lat: Number,
     stop_lon: Number,
     location_type: Number,
     stop_times: [stopTimeSchema]
-}, { _id: false });  // Added _id: false to prevent duplicate _id field);
+}, { _id: false });
+
+// Add only additional needed indexes
+stopSchema.index({ 'stop_times': 1 });  // For the getBusyStops aggregation
 
 const Stop = mongoose.model('Stop', stopSchema);
 

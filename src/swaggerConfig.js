@@ -2,7 +2,6 @@ import express from 'express';
 import swaggerUi from 'swagger-ui-express';
 import swaggerJSDoc from 'swagger-jsdoc';
 
-// Initialize the express app
 const app = express();
 
 // Swagger setup
@@ -13,6 +12,17 @@ const swaggerDefinition = {
     version: '1.0.0',
     description: 'API documentation for the ticketing system',
   },
+  components: {
+    securitySchemes: {
+      adminAuth: {
+        type: 'apiKey',
+        in: 'header',
+        name: 'admin-code',
+        description: 'Admin authentication code'
+      }
+    }
+  },
+  security: [], // Empty by default - security will be defined at endpoint level
   tags: [
     {
       name: 'User Management',
@@ -25,20 +35,41 @@ const swaggerDefinition = {
     {
       name: 'Trips',
       description: 'Trip-related operations'
+    },
+    {
+      name: 'Admin',
+      description: 'Administrative operations (Requires admin authentication)'
     }
-  ],
+  ]
 };
 
 const options = {
   swaggerDefinition,
-  apis: ['./src/routes/*.js'], // This should point to your route files
+  apis: ['./src/routes/*.js'],
 };
 
-// Initialize swagger-jsdoc
 const swaggerSpec = swaggerJSDoc(options);
 
-// Setup Swagger UI
-app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
+// Custom options for swagger UI
+const swaggerUiOptions = {
+  swaggerOptions: {
+    persistAuthorization: true,
+    authAction: {
+      adminAuth: {
+        name: "adminAuth",
+        schema: {
+          type: "apiKey",
+          in: "header",
+          name: "admin-code",
+          description: "Admin authentication code"
+        },
+        value: "your-admin-code"
+      }
+    }
+  }
+};
+
+app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, swaggerUiOptions));
 
 app.listen(3000, () => {
   console.log('Server is running on http://localhost:3000');

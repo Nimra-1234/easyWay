@@ -6,32 +6,6 @@ const router = express.Router();
 
 /**
  * @swagger
- * components:
- *   securitySchemes:
- *     adminAuth:
- *       type: apiKey
- *       in: header
- *       name: admin-code
- *       description: Secure admin authentication code
- * 
- *   responses:
- *     AdminUnauthorized:
- *       description: Admin authentication required
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             properties:
- *               success:
- *                 type: boolean
- *                 example: false
- *               error:
- *                 type: string
- *                 example: "Admin authentication required"
- */
-
-/**
- * @swagger
  * /api/users/admin/lucky-draw:
  *   get:
  *     summary: Admin endpoint to get detailed lucky draw data

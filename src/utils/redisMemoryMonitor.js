@@ -1,7 +1,7 @@
 // In utils/redisMemoryMonitor.js
 import redisClient from '../config/redisClient.js';
 
-const MAX_USERS_IN_CACHE = 6;  // Set back to 6000 for production
+const MAX_USERS_IN_CACHE = 6000;  // Set back to 6000 for production
 const BATCH_SIZE = 100;
 
 const REDIS_KEYS = {

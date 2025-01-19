@@ -23,11 +23,10 @@ const routeSchema = new mongoose.Schema({
     collection: 'routes'
 });
 
-// Optimized indexes
-// 1. Primary index for route lookups
-routeSchema.index({ route_id: 1 }, { unique: true });
 
-// 3. Index for finding specific trips
+// Index for finding specific trips
+
+routeSchema.index({ route_id: 1 }, { unique: true });
 routeSchema.index({ 'trips.trip_id': 1 });
 
 const Route = mongoose.model('Route', routeSchema);
