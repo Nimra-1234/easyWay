@@ -50,6 +50,11 @@ export const createTicket = async (req, res) => {
             }
         }
 
+        // Only proceed with ticket creation if we have a valid user
+        if (!user) {
+            return res.status(404).json({ error: 'Invalid user state' });
+        }
+
         const ticketId = uuidv4();
         const now = new Date();
         const expirationTime = new Date(now.getTime() + TICKET_EXPIRY_SECONDS * 1000);
@@ -65,49 +70,54 @@ export const createTicket = async (req, res) => {
             expired_at: expirationTime.toISOString()
         };
 
-        // Use Redis multi for atomic operations
+        // Use Redis transaction for atomic operations
         const multi = redisClient.multi();
         
-        // Store ticket with TTL
-        multi.hSet(REDIS_KEYS.ticket(ticketId), ticket);
-        multi.expire(REDIS_KEYS.ticket(ticketId), TICKET_EXPIRY_SECONDS);
-        
-        // Add to user's active tickets set with same TTL
-        multi.sAdd(REDIS_KEYS.userActiveTickets(taxCode), ticketId);
-        multi.expire(REDIS_KEYS.userActiveTickets(taxCode), TICKET_EXPIRY_SECONDS);
-        
-        await multi.exec();
-
-        // Update MongoDB
-        const updatedUser = await User.findOneAndUpdate(
-            { taxCode },
-            { 
-                $inc: { totalTickets: 1 },
-                $set: { 
-                    lastTicketAt: now,
-                    updatedAt: now 
-                }
-            },
-            { new: true }
-        );
-
-        // Update Redis cache if it exists
-        const userInCache = await redisClient.exists(REDIS_KEYS.user(taxCode));
-        if (userInCache) {
-            const multi = redisClient.multi();
-            multi.hSet(REDIS_KEYS.user(taxCode), {
-                totalTickets: updatedUser.totalTickets.toString(),
-                updatedAt: now.toISOString()
-            });
+        try {
+            // Store ticket with TTL
+            multi.hSet(REDIS_KEYS.ticket(ticketId), ticket);
+            multi.expire(REDIS_KEYS.ticket(ticketId), TICKET_EXPIRY_SECONDS);
+            
+            // Add to user's active tickets set with same TTL
+            multi.sAdd(REDIS_KEYS.userActiveTickets(taxCode), ticketId);
+            multi.expire(REDIS_KEYS.userActiveTickets(taxCode), TICKET_EXPIRY_SECONDS);
+            
             await multi.exec();
-        }
 
-        res.status(201).json({ 
-            success: true,
-            message: 'Ticket created successfully', 
-            ticket,
-            expiresIn: `${TICKET_EXPIRY_SECONDS} seconds`
-        });
+            // Update MongoDB only after successful Redis operations
+            const updatedUser = await User.findOneAndUpdate(
+                { taxCode },
+                { 
+                    $inc: { totalTickets: 1 },
+                    $set: { 
+                        lastTicketAt: now,
+                        updatedAt: now 
+                    }
+                },
+                { new: true }
+            );
+
+            // Update Redis cache if it exists
+            const userInCache = await redisClient.exists(REDIS_KEYS.user(taxCode));
+            if (userInCache) {
+                await redisClient.hSet(REDIS_KEYS.user(taxCode), {
+                    totalTickets: updatedUser.totalTickets.toString(),
+                    updatedAt: now.toISOString()
+                });
+            }
+
+            res.status(201).json({ 
+                success: true,
+                message: 'Ticket created successfully', 
+                ticket,
+                expiresIn: `${TICKET_EXPIRY_SECONDS} seconds`
+            });
+        } catch (error) {
+            // Rollback Redis operations if something fails
+            await redisClient.del(REDIS_KEYS.ticket(ticketId));
+            await redisClient.sRem(REDIS_KEYS.userActiveTickets(taxCode), ticketId);
+            throw error;
+        }
     } catch (error) {
         console.error('Error creating ticket:', error);
         res.status(500).json({ error: 'Failed to create ticket' });

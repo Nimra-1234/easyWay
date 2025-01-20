@@ -130,7 +130,6 @@ export const getRoutesByTripCount = async (req, res) => {
 export const calculateRouteAverageDuration = async (req, res) => {
     const { routeId } = req.params;
     try {
-        // Document Linking: First get route document
         const route = await Route.findOne({ route_id: routeId });
         if (!route) {
             return res.status(404).json({
@@ -141,11 +140,9 @@ export const calculateRouteAverageDuration = async (req, res) => {
         const tripIds = route.trips.map(trip => trip.trip_id);
 
         const tripsWithTimes = await Trip.aggregate([
-            // Match trips from the route
             { 
                 $match: { trip_id: { $in: tripIds } } 
             },
-            // Get first and last stops from itinerary
             {
                 $addFields: {
                     firstStop: { $arrayElemAt: ["$itinerary", 0] },

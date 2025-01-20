@@ -16,9 +16,6 @@ const stopSchema = new mongoose.Schema({
     stop_times: [stopTimeSchema]
 }, { _id: false });
 
-// Add only additional needed indexes
-stopSchema.index({ 'stop_times': 1 });  // For the getBusyStops aggregation
-
 const Stop = mongoose.model('Stop', stopSchema);
 
 export default Stop;

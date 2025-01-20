@@ -202,8 +202,6 @@ const importGTFSData = async ({ gtfsPath, batchSize = 1000, mongoUrl }) => {
             const tripStopTimes = stopTimesForTrips.get(trip.trip_id) || [];
             return {
                 trip_id: trip.trip_id,
-                route_id: trip.route_id,
-                service_id: trip.service_id,
                 trip_headsign: trip.trip_headsign,
                 direction_id: parseInt(trip.direction_id) || 0,
                 itinerary: tripStopTimes

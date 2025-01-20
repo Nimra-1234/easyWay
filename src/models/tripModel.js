@@ -10,15 +10,12 @@ const stopInTripSchema = new mongoose.Schema({
 
 const tripSchema = new mongoose.Schema({
     trip_id: { type: String, required: true },
-    route_id: { type: String, required: true },
-    service_id: { type: String, required: true },
     trip_headsign: String,
     direction_id: Number,
     // Flattened and simplified stop sequence
     itinerary: [stopInTripSchema]
 }, { 
     collection: 'trips',
-    // Add virtual for journey duration
     toJSON: { virtuals: true },
     toObject: { virtuals: true }
 });
